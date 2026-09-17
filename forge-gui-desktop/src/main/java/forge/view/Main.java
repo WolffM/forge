@@ -108,7 +108,7 @@ public final class Main {
                 break;
 
             case "server":
-                System.out.println("Dedicated server mode.\nNot implemented.");
+                DedicatedServer.start(args);
                 break;
 
             default:
