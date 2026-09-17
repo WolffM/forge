@@ -22,8 +22,6 @@ import forge.Singletons;
 import forge.error.ExceptionHandler;
 import forge.gui.GuiBase;
 import forge.gui.card.CardReaderExperiments;
-import forge.util.BuildInfo;
-import io.sentry.Sentry;
 
 /**
  * Main class for Forge's swing application view.
@@ -34,7 +32,7 @@ public final class Main {
      */
     public static void main(final String[] args) {
         // Command line modes must never touch the display: they run on servers, in CI, and over ssh.
-        // This has to happen before any AWT class loads, so it also has to happen before Sentry.init.
+        // This has to happen before any AWT class loads, so it happens before anything else here.
         final String mode = args.length > 0 ? args[0].toLowerCase() : "";
         if (isCommandLineMode(mode) && System.getProperty("java.awt.headless") == null) {
             // Only when the user hasn't decided: setting this here would otherwise beat an explicit
@@ -43,9 +41,9 @@ public final class Main {
             System.setProperty("java.awt.headless", "true");
         }
 
-        // Sentry chains to whatever default handler is already installed, but if none is, an uncaught
-        // exception is reported and then discarded without ever reaching stderr. Install a printing
-        // handler first so failures during the startup below are visible rather than a bare exit code.
+        // With no default handler installed, an uncaught exception on a startup thread ends the
+        // process with nothing on stderr. Install a printing handler first so failures during the
+        // startup below are visible rather than a bare exit code.
         //
         // This cannot just be registerErrorHandling() moved up: that reads ForgeConstants.LOG_FILE,
         // whose class initializer resolves ASSETS_DIR through GuiBase.getInterface() and so needs the
@@ -62,16 +60,17 @@ public final class Main {
             System.err.flush();
         });
 
-        Sentry.init(options -> {
-            options.setEnableExternalConfiguration(true);
-            options.setRelease(BuildInfo.getVersionString());
-            options.setEnvironment(System.getProperty("os.name"));
-            options.setTag("Java Version", System.getProperty("java.version"));
-            options.setShutdownTimeoutMillis(5000);
-            // these belong to sentry.properties, but somehow some OS/Zip tool discards it?
-            if (options.getDsn() == null || options.getDsn().isEmpty())
-                options.setDsn("https://87bc8d329e49441895502737c069067b@sentry.asgardsrealm.net/3");
-        }, true);
+        // Upstream calls Sentry.init() here with the Forge project's own hardcoded DSN, and refills
+        // that DSN whenever external configuration leaves it empty — so nothing outside the code can
+        // switch it off. This fork is operated by someone else, and a dedicated server would post
+        // unattended crash reports to a project that never asked for them. The call is deleted
+        // outright rather than blanked: an empty DSN is exactly the case upstream re-fills. With no
+        // Sentry.init() anywhere in this entry point, io.sentry's static API stays a no-op, so the
+        // breadcrumbs the game code records are collected and dropped rather than sent.
+        //
+        // forge-gui-desktop/sentry.properties still carries the same DSN. It is inert without an
+        // init() to read it (the Java SDK has no auto-initialisation), and it is not packaged into
+        // the fat jar; removing it is a separate change to a separate file.
 
         // HACK - temporary solution to "Comparison method violates it's general contract!" crash
         System.setProperty("java.util.Arrays.useLegacyMergeSort", "true");
