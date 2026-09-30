@@ -22,10 +22,19 @@ public class LondonMulligan extends AbstractMulligan {
 
     @Override
     public void mulliganDraw() {
+        // London order: draw the new hand and let the player decide on it. The cards
+        // go to the bottom only once the player keeps (see keep()).
         player.drawCards(handSizeAfterNextMulligan());
-        int tuckingCards = tuckCardsDuringMulligan();
-        CardCollection hand = new CardCollection(player.getCardsIn(ZoneType.Hand));
+    }
 
+    @Override
+    public void keep() {
+        super.keep();
+        int tuckingCards = tuckCardsDuringMulligan();
+        if (tuckingCards <= 0) {
+            return;
+        }
+        CardCollection hand = new CardCollection(player.getCardsIn(ZoneType.Hand));
         for (final Card c : player.getController().tuckCardsViaMulligan(hand, tuckingCards)) {
             player.getGame().getAction().moveToLibrary(c, -1, null);
         }
