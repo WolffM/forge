@@ -1,8 +1,10 @@
 package forge.ai;
 
+import forge.card.mana.ManaCost;
 import forge.game.card.Card;
 import forge.game.card.CardLists;
 import forge.game.card.CardView;
+import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
 import forge.game.zone.ZoneType;
@@ -107,7 +109,35 @@ public final class AvailableActions {
         if (sa.getPayCosts() == null || !sa.getPayCosts().hasManaCost()) {
             return true;
         }
-        return ComputerUtilMana.canPayManaCost(sa, player, 0, false);
+        if (ComputerUtilMana.canPayManaCost(sa, player, 0, false)) {
+            return true;
+        }
+        return canAffordWithLife(sa, player);
+    }
+
+    /**
+     * The AI payer above declines to pay Phyrexian mana with life whenever a script carries an
+     * AI hint such as {@code AIPhyrexianPayment$ Never} (Gitaxian Probe does), because that is a
+     * strategy choice for the computer. A human may always pay 2 life for a Phyrexian shard, so
+     * pay k shards with life (if the player can afford the life) and ask whether mana covers the
+     * rest, most life first.
+     */
+    private static boolean canAffordWithLife(SpellAbility sa, Player player) {
+        final ManaCost total = sa.getPayCosts().getTotalMana();
+        final int phyrexian = total.getPhyrexianCount();
+        for (int k = phyrexian; k >= 1; k--) {
+            if (!player.canPayLife(2 * k, false, sa)) {
+                continue;
+            }
+            final ManaCostBeingPaid remaining = new ManaCostBeingPaid(total);
+            for (int i = 0; i < k; i++) {
+                remaining.payPhyrexian();
+            }
+            if (remaining.isPaid() || ComputerUtilMana.canPayManaCost(remaining, sa, player, false)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean checkTimeout(long deadlineNanos, long timeoutMs) {
