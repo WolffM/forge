@@ -4,6 +4,8 @@ import forge.card.mana.ManaCost;
 import forge.game.card.Card;
 import forge.game.card.CardLists;
 import forge.game.card.CardView;
+import forge.game.cost.Cost;
+import forge.game.cost.CostTap;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
@@ -79,14 +81,32 @@ public final class AvailableActions {
 
     // Land plays come through with no cost, no targets; spells and activated abilities (incl.
     // hand-activations like Channel) all hit the same shape: not a mana ability, affordable, targetable.
+    //
+    // Desktop Forge lets a player tap lands freely before casting anything; our click filter
+    // used to hide every mana ability (R15), so a land was never offered at priority. A mana
+    // ability whose only cost is tapping (a basic land's, a dual's) is now offered too — cheap
+    // to prove right because tapping has no side effect to undo. A mana ability with a cost
+    // beyond tapping (pay life, sacrifice, an additional mana cost — painlands, Karoo-style
+    // bounce-lands' ETB aside, filter lands) stays excluded until there's a real case to shape
+    // around; the player already reaches those through the payment prompt.
     private static boolean cardHasActionable(Card card, Player player) {
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
-            if (!sa.isManaAbility() && canAfford(sa, player)
-                    && ComputerUtilAbility.isFullyTargetable(sa)) {
+            if (sa.isManaAbility()) {
+                if (isTapOnlyManaAbility(sa) && ComputerUtilAbility.isFullyTargetable(sa)) {
+                    return true;
+                }
+                continue;
+            }
+            if (canAfford(sa, player) && ComputerUtilAbility.isFullyTargetable(sa)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isTapOnlyManaAbility(SpellAbility sa) {
+        final Cost cost = sa.getPayCosts();
+        return cost != null && cost.getCostParts().size() == 1 && cost.hasSpecificCostType(CostTap.class);
     }
 
     /** Timeout fallback: mark only the cards we never got to evaluate (FP-safe).
