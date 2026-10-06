@@ -2700,6 +2700,10 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         }
 
         if (getGame().getStack().undo()) {
+            // The cache was computed when priority returned after the action, so it still
+            // sees the undone state (a land tapped for mana stays unoffered). Drop it so the
+            // re-shown prompt rescans the board as the undo left it.
+            cachedActionableCards = null;
             final Input currentInput = inputQueue.getInput();
             if (currentInput instanceof InputPassPriority) {
                 // ensure prompt updated if needed
