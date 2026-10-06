@@ -2816,8 +2816,11 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
     }
 
     public boolean canUndoLastAction() {
-        if (getGame().getPhaseHandler().getPriorityPlayer() != player) return false;
-        return getGame().getUndoManager().canUndo(player) && inputQueue.getInput() instanceof InputPassPriority;
+        if (!getGame().stack.canUndo(player)) {
+            return false;
+        }
+        final Player priorityPlayer = getGame().getPhaseHandler().getPriorityPlayer();
+        return priorityPlayer != null && priorityPlayer == player;
     }
 
     @Override
@@ -2825,13 +2828,30 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         tryUndoLastAction();
     }
 
-    /** Asks the game thread to rewind to the previous priority prompt; the actual restore happens in chooseSpellAbilityToPlay. */
     public boolean tryUndoLastAction() {
-        if (!canUndoLastAction()) return false;
-        if (!(inputQueue.getInput() instanceof InputPassPriority inp)) return false;
-        getGame().getUndoManager().requestUndo();
-        inp.restartPrompt();
-        return true;
+        if (!canUndoLastAction()) {
+            return false;
+        }
+
+        if (getGame().getStack().undo()) {
+            // The cache was computed when priority returned after the action, so it still
+            // sees the undone state (a land tapped for mana stays unoffered). Drop it so the
+            // re-shown prompt rescans the board as the undo left it.
+            cachedActionableCards = null;
+            final Input currentInput = inputQueue.getInput();
+            if (currentInput instanceof InputPassPriority) {
+                // ensure prompt updated if needed
+                currentInput.showMessageInitial();
+            }
+            if (getGui().isNetGame()) {
+                // Flush events to remote clients — the undo modifies game state
+                // (untaps lands, etc.) after the prompt is shown, and without this
+                // the updated state sits in the forwarder buffer until the next action.
+                inputQueue.updateObservers();
+            }
+            return true;
+        }
+        return false;
     }
 
     @Override
