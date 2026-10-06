@@ -5,6 +5,8 @@ import forge.game.card.Card;
 import forge.game.card.CardLists;
 import forge.game.card.CardView;
 import forge.game.cost.Cost;
+import forge.game.cost.CostPart;
+import forge.game.cost.CostPartMana;
 import forge.game.cost.CostTap;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
@@ -84,15 +86,17 @@ public final class AvailableActions {
     //
     // Desktop Forge lets a player tap lands freely before casting anything; our click filter
     // used to hide every mana ability (R15), so a land was never offered at priority. A mana
-    // ability whose only cost is tapping (a basic land's, a dual's) is now offered too — cheap
-    // to prove right because tapping has no side effect to undo. A mana ability with a cost
-    // beyond tapping (pay life, sacrifice, an additional mana cost — painlands, Karoo-style
-    // bounce-lands' ETB aside, filter lands) stays excluded until there's a real case to shape
-    // around; the player already reaches those through the payment prompt.
+    // ability whose only cost is tapping (a basic land's, a dual's) is offered, and so is one
+    // that adds a mana payment to the tap (a Signet's {1},{T}) when that mana can be paid now,
+    // from the pool or another source — the same mana ability the payment prompt offers. A mana
+    // ability with any other cost (pay life, sacrifice — painlands, Lotus Petal) stays excluded
+    // until there's a real case to shape around; the player reaches those through the payment
+    // prompt.
     private static boolean cardHasActionable(Card card, Player player) {
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
             if (sa.isManaAbility()) {
-                if (isTapOnlyManaAbility(sa) && ComputerUtilAbility.isFullyTargetable(sa)) {
+                if (isTapAndManaOnlyManaAbility(sa) && canAfford(sa, player)
+                        && ComputerUtilAbility.isFullyTargetable(sa)) {
                     return true;
                 }
                 continue;
@@ -104,9 +108,17 @@ public final class AvailableActions {
         return false;
     }
 
-    private static boolean isTapOnlyManaAbility(SpellAbility sa) {
+    private static boolean isTapAndManaOnlyManaAbility(SpellAbility sa) {
         final Cost cost = sa.getPayCosts();
-        return cost != null && cost.getCostParts().size() == 1 && cost.hasSpecificCostType(CostTap.class);
+        if (cost == null || !cost.hasSpecificCostType(CostTap.class)) {
+            return false;
+        }
+        for (CostPart part : cost.getCostParts()) {
+            if (!(part instanceof CostTap) && !(part instanceof CostPartMana)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Timeout fallback: mark only the cards we never got to evaluate (FP-safe).
