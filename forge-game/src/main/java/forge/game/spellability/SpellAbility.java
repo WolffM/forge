@@ -19,6 +19,7 @@ package forge.game.spellability;
 
 import java.util.*;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.*;
 
 import com.google.common.base.Supplier;
@@ -1720,7 +1721,18 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
     }
 
     public boolean undo() {
-        if (isUndoable() && getActivatingPlayer().getManaPool().accountFor(getManaPart())) {
+        if (!isUndoable()) {
+            return false;
+        }
+        // The mana may have come from a sub-ability (River of Tears' {B}); every part of the chain
+        // that produced is accounted for, and the cost is refunded only if all of it still floats.
+        List<AbilityManaPart> parts = Lists.newArrayList();
+        for (SpellAbility tail = this; tail != null; tail = tail.getSubAbility()) {
+            if (tail.getManaPart() != null) {
+                parts.add(tail.getManaPart());
+            }
+        }
+        if (getActivatingPlayer().getManaPool().accountFor(parts)) {
             payCosts.refundPaidCost(hostCard);
             return true;
         }

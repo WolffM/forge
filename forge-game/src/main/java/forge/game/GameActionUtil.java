@@ -875,12 +875,15 @@ public final class GameActionUtil {
             baseMana = abMana.mana(sa);
         }
 
-        if (sa.getSubAbility() != null) {
-            // Mark SAs with subAbilities as undoable. These are generally things like damage, and other stuff
-            // that's hard to track and remove
-            sa.setUndoable(false);
-        } else if (sa.hasParam("Amount") && !StringUtils.isNumeric(sa.getParam("Amount"))) {
-            sa.setUndoable(false);
+        // A chain that is mana all the way down (River of Tears: "Add {U}. If you played a land this
+        // turn, add {B} instead" is a Mana ability with a Mana sub-ability, each under a condition) is
+        // undone like a plain one: SpellAbility.undo() accounts for every part's mana. A sub-ability
+        // that is anything else (damage, a draw) is hard to track and remove, so that stays not undoable.
+        for (SpellAbility tail = sa; tail != null; tail = tail.getSubAbility()) {
+            if (tail.getApi() != ApiType.Mana || (tail.hasParam("Amount") && !StringUtils.isNumeric(tail.getParam("Amount")))) {
+                sa.setUndoable(false);
+                break;
+            }
         }
 
         final StringBuilder sb = new StringBuilder();
