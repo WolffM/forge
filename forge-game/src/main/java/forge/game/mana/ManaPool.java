@@ -276,31 +276,31 @@ public class ManaPool extends ManaConversionMatrix implements Iterable<Mana> {
         if (ma == null) {
             return false;
         }
-        if (floatingMana.isEmpty()) {
-            return false;
-        }
+        return accountFor(Lists.newArrayList(ma));
+    }
 
+    /**
+     * Every Mana these parts last produced, taken back out of the pool if ALL of it still floats —
+     * none of it otherwise. A chain of mana parts (an ability and its mana sub-abilities) is undone
+     * as one: a part that produced nothing (its condition did not hold) asks for nothing.
+     */
+    public boolean accountFor(final Iterable<AbilityManaPart> parts) {
         final List<Mana> removeFloating = Lists.newArrayList();
-
-        boolean manaNotAccountedFor = false;
-        // loop over mana produced by mana ability
-        for (Mana mana : ma.getLastManaProduced()) {
-            Collection<Mana> poolLane = floatingMana.get(mana.getColor());
-
-            if (poolLane != null && poolLane.contains(mana)) {
+        for (AbilityManaPart ma : parts) {
+            // loop over mana produced by mana ability
+            for (Mana mana : ma.getLastManaProduced()) {
+                Collection<Mana> poolLane = floatingMana.get(mana.getColor());
+                if (poolLane == null || !poolLane.contains(mana)) {
+                    // When is it legitimate for all the mana not to be accountable?
+                    // TODO: Does this condition really indicate an bug in Forge?
+                    return false;
+                }
                 removeFloating.add(mana);
-            } else {
-                manaNotAccountedFor = true;
-                break;
             }
         }
-
-        // When is it legitimate for all the mana not to be accountable?
-        // TODO: Does this condition really indicate an bug in Forge?
-        if (manaNotAccountedFor) {
+        if (removeFloating.isEmpty() && floatingMana.isEmpty()) {
             return false;
         }
-
         removeMana(removeFloating);
         return true;
     }
