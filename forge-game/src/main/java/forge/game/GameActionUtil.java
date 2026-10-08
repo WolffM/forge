@@ -879,7 +879,12 @@ public final class GameActionUtil {
         // turn, add {B} instead" is a Mana ability with a Mana sub-ability, each under a condition) is
         // undone like a plain one: SpellAbility.undo() accounts for every part's mana. A sub-ability
         // that is anything else (damage, a draw) is hard to track and remove, so that stays not undoable.
+        // A painland's "deals 1 damage to you" is reversed by the undo too (SpellAbility.undo()
+        // gives the life back): a fixed amount to the activator alone.
         for (SpellAbility tail = sa; tail != null; tail = tail.getSubAbility()) {
+            if (SpellAbility.isSelfPain(tail)) {
+                continue;
+            }
             if (tail.getApi() != ApiType.Mana || (tail.hasParam("Amount") && !StringUtils.isNumeric(tail.getParam("Amount")))) {
                 sa.setUndoable(false);
                 break;

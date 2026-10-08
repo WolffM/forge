@@ -1734,9 +1734,22 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
         }
         if (getActivatingPlayer().getManaPool().accountFor(parts)) {
             payCosts.refundPaidCost(hostCard);
+            // The painland's own damage ("deals 1 damage to you") goes back with the mana.
+            for (SpellAbility tail = this; tail != null; tail = tail.getSubAbility()) {
+                if (isSelfPain(tail)) {
+                    Player me = getActivatingPlayer();
+                    me.setLife(me.getLife() + Integer.parseInt(tail.getParam("NumDmg")), this);
+                }
+            }
             return true;
         }
         return false;
+    }
+
+    /** A fixed amount of damage dealt to the activating player alone — a painland's sub-ability — which an undo gives back. */
+    public static boolean isSelfPain(SpellAbility sa) {
+        return sa.getApi() == ApiType.DealDamage && "You".equals(sa.getParam("Defined")) && sa.hasParam("NumDmg")
+                && StringUtils.isNumeric(sa.getParam("NumDmg")) && !sa.hasParam("DamageSource") && sa.getSubAbility() == null;
     }
 
     public void setUndoable(boolean b) {
