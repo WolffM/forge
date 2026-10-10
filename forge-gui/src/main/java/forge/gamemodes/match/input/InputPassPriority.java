@@ -43,6 +43,7 @@ import forge.util.ThreadUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * <p>
@@ -328,8 +329,28 @@ public class InputPassPriority extends InputSyncronizedBase {
 
     public List<SpellAbility> getChosenSa() { return chosenSa; }
 
+    /**
+     * A click that arrives while an earlier one is still being taken (it may be waiting on the
+     * player's choice of ability) is turned away, never queued: two onCardSelected side by side on
+     * one game left a view unserializable (every later getAbilityToPlay failed to encode, an
+     * ArrayIndexOutOfBoundsException in EnumMap.writeObject). Nothing waits here, so no thread can
+     * block on the connection it was called from.
+     */
+    private final AtomicBoolean selecting = new AtomicBoolean();
+
     @Override
     protected boolean onCardSelected(final Card card, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
+        if (!selecting.compareAndSet(false, true)) {
+            return false;
+        }
+        try {
+            return takeCard(card, otherCardsToSelect, triggerEvent);
+        } finally {
+            selecting.set(false);
+        }
+    }
+
+    private boolean takeCard(final Card card, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
         // A permanent tapped for mana that is still unspent untaps on a click, in any order.
         if (getController().tryUndo(card)) {
             return true;
