@@ -31,6 +31,11 @@ public abstract class GameProtocolHandler<T> extends ChannelInboundHandlerAdapte
         return runInEdt;
     }
 
+    /** Run a received call off the IO thread, on a thread of its own. */
+    protected void runInBackground(final ChannelHandlerContext ctx, final ProtocolMethod protocolMethod, final Runnable toRun) {
+        FThreads.invokeInBackgroundThread(toRun);
+    }
+
     @Override
     public final void channelRead(final ChannelHandlerContext ctx, final Object msg) {
         final String[] catchedError = {""};
@@ -117,7 +122,7 @@ public abstract class GameProtocolHandler<T> extends ChannelInboundHandlerAdapte
             if (shouldDispatchToGuiThread(protocolMethod)) {
                 FThreads.invokeInEdtNowOrLater(toRun);
             } else {
-                FThreads.invokeInBackgroundThread(toRun);
+                runInBackground(ctx, protocolMethod, toRun);
             }
         }
     }

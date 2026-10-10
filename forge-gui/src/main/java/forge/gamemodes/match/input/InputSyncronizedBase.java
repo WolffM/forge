@@ -22,7 +22,7 @@ public abstract class InputSyncronizedBase extends InputBase implements InputSyn
         FThreads.assertExecutedByEdt(false);
         netLog.trace("awaitLatchRelease() starting on {}, thread = {}", this.getClass().getSimpleName(), Thread.currentThread().getName());
         try {
-            cdlDone.await();
+            ActGate.of(getController().getGame()).await(cdlDone);
         } catch (final InterruptedException e) {
             BugReporter.reportException(e);
         }
