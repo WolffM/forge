@@ -875,17 +875,17 @@ public final class GameActionUtil {
             baseMana = abMana.mana(sa);
         }
 
-        // A chain that is mana all the way down (River of Tears: "Add {U}. If you played a land this
-        // turn, add {B} instead" is a Mana ability with a Mana sub-ability, each under a condition) is
-        // undone like a plain one: SpellAbility.undo() accounts for every part's mana. A sub-ability
-        // that is anything else (damage, a draw) is hard to track and remove, so that stays not undoable.
-        // A painland's "deals 1 damage to you" is reversed by the undo too (SpellAbility.undo()
-        // gives the life back): a fixed amount to the activator alone.
+        // A mana ability is undone by taking back exactly the mana it made (SpellAbility.undo() reads
+        // each part's getLastManaProduced(), so a variable amount — Urza's Mine — and a conditional
+        // Mana sub-ability — River of Tears — need nothing more) and refunding its cost. What the undo
+        // cannot take back is a sub-ability that does something else (a draw); the one it can is a
+        // painland's fixed damage to the activator, which SpellAbility.undo() gives back. A trigger
+        // the activation fired marks it not undoable on its own (TriggerHandler.adjustUndoStack).
         for (SpellAbility tail = sa; tail != null; tail = tail.getSubAbility()) {
             if (SpellAbility.isSelfPain(tail)) {
                 continue;
             }
-            if (tail.getApi() != ApiType.Mana || (tail.hasParam("Amount") && !StringUtils.isNumeric(tail.getParam("Amount")))) {
+            if (tail.getApi() != ApiType.Mana) {
                 sa.setUndoable(false);
                 break;
             }

@@ -2695,29 +2695,41 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
     }
 
     public boolean tryUndoLastAction() {
-        if (!canUndoLastAction()) {
+        if (!canUndoLastAction() || !getGame().getStack().undo()) {
             return false;
         }
+        afterUndo();
+        return true;
+    }
 
-        if (getGame().getStack().undo()) {
-            // The cache was computed when priority returned after the action, so it still
-            // sees the undone state (a land tapped for mana stays unoffered). Drop it so the
-            // re-shown prompt rescans the board as the undo left it.
-            cachedActionableCards = null;
-            final Input currentInput = inputQueue.getInput();
-            if (currentInput instanceof InputPassPriority) {
-                // ensure prompt updated if needed
-                currentInput.showMessageInitial();
-            }
-            if (getGui().isNetGame()) {
-                // Flush events to remote clients — the undo modifies game state
-                // (untaps lands, etc.) after the prompt is shown, and without this
-                // the updated state sits in the forwarder buffer until the next action.
-                inputQueue.updateObservers();
-            }
-            return true;
+    /**
+     * Untap a permanent this player tapped for mana, in any order: its activation is undone
+     * when all the mana it made still floats and it fired no trigger (MagicStack.undoableBy).
+     */
+    public boolean tryUndo(final Card host) {
+        if (!canUndoLastAction() || !host.isTapped() || !getGame().getStack().undo(host)) {
+            return false;
         }
-        return false;
+        afterUndo();
+        return true;
+    }
+
+    private void afterUndo() {
+        // The cache was computed when priority returned after the action, so it still
+        // sees the undone state (a land tapped for mana stays unoffered). Drop it so the
+        // re-shown prompt rescans the board as the undo left it.
+        cachedActionableCards = null;
+        final Input currentInput = inputQueue.getInput();
+        if (currentInput instanceof InputPassPriority) {
+            // ensure prompt updated if needed
+            currentInput.showMessageInitial();
+        }
+        if (getGui().isNetGame()) {
+            // Flush events to remote clients — the undo modifies game state
+            // (untaps lands, etc.) after the prompt is shown, and without this
+            // the updated state sits in the forwarder buffer until the next action.
+            inputQueue.updateObservers();
+        }
     }
 
     @Override

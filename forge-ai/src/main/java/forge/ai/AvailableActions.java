@@ -92,7 +92,14 @@ public final class AvailableActions {
     // ability with any other cost (pay life, sacrifice — painlands, Lotus Petal) stays excluded
     // until there's a real case to shape around; the player reaches those through the payment
     // prompt.
+    //
+    // A permanent tapped for mana whose mana still floats is offered too: a click on it untaps it
+    // (InputPassPriority.onCardSelected → PlayerControllerHuman.tryUndo), in any order.
     private static boolean cardHasActionable(Card card, Player player) {
+        if (card.isTapped() && player.getGame().getStack().canUndo(player)
+                && player.getGame().getStack().undoableBy(card) != null) {
+            return true;
+        }
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
             if (sa.isManaAbility()) {
                 if (isTapAndManaOnlyManaAbility(sa) && canAfford(sa, player)
@@ -144,7 +151,44 @@ public final class AvailableActions {
         if (ComputerUtilMana.canPayManaCost(sa, player, 0, false)) {
             return true;
         }
-        return canAffordWithLife(sa, player);
+        return canAffordWithManaRocks(sa, player) || canAffordWithLife(sa, player);
+    }
+
+    /**
+     * The AI payer leaves out every mana ability that itself costs mana
+     * ({@code ComputerUtilMana.getAIPlayableMana}: "the AI will miscalculate"), so a Signet
+     * ({1},{T}: add {U}{R}) never counts toward what a player can pay. Count each one the player
+     * can activate here, one at a time: its own mana cost joins the total, and the mana it makes
+     * pays toward it; then ask the payer about the rest.
+     */
+    private static boolean canAffordWithManaRocks(SpellAbility sa, Player player) {
+        final ManaCostBeingPaid cost = ComputerUtilMana.calculateManaCost(sa.getPayCosts(), sa, player, true, 0, false);
+        boolean added = false;
+        for (Card rock : player.getCardsIn(ZoneType.Battlefield)) {
+            if (rock == sa.getHostCard()) {
+                continue;
+            }
+            for (SpellAbility ma : rock.getManaAbilities()) {
+                ma.setActivatingPlayer(player);
+                if (!isTapAndManaOnlyManaAbility(ma) || !ma.getPayCosts().hasManaCost() || !ma.canPlay()
+                        || ma.getManaPart().isComboMana() || ma.getManaPart().isAnyMana() || ma.getManaPart().isSpecialMana()) {
+                    continue;
+                }
+                cost.addManaCost(ma.getPayCosts().getTotalMana());
+                final int amount = ma.amountOfManaGenerated(false);
+                for (String colour : ma.getManaPart().mana(ma).split(" ")) {
+                    for (int i = 0; i < amount; i++) {
+                        cost.ai_payMana(colour, player.getManaPool());
+                    }
+                }
+                added = true;
+                break;
+            }
+            if (added && (cost.isPaid() || ComputerUtilMana.canPayManaCost(cost, sa, player, false))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

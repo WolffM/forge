@@ -1724,15 +1724,7 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
         if (!isUndoable()) {
             return false;
         }
-        // The mana may have come from a sub-ability (River of Tears' {B}); every part of the chain
-        // that produced is accounted for, and the cost is refunded only if all of it still floats.
-        List<AbilityManaPart> parts = Lists.newArrayList();
-        for (SpellAbility tail = this; tail != null; tail = tail.getSubAbility()) {
-            if (tail.getManaPart() != null) {
-                parts.add(tail.getManaPart());
-            }
-        }
-        if (getActivatingPlayer().getManaPool().accountFor(parts)) {
+        if (getActivatingPlayer().getManaPool().accountFor(manaParts())) {
             payCosts.refundPaidCost(hostCard);
             // The painland's own damage ("deals 1 damage to you") goes back with the mana.
             for (SpellAbility tail = this; tail != null; tail = tail.getSubAbility()) {
@@ -1744,6 +1736,22 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
             return true;
         }
         return false;
+    }
+
+    /** Whether {@link #undo()} would succeed now: undoable, and every mana it made still floats. */
+    public boolean canUndo() {
+        return isUndoable() && getActivatingPlayer().getManaPool().holdsAll(manaParts());
+    }
+
+    /** The mana may have come from a sub-ability (River of Tears' {B}): every part of the chain that produced. */
+    private List<AbilityManaPart> manaParts() {
+        List<AbilityManaPart> parts = Lists.newArrayList();
+        for (SpellAbility tail = this; tail != null; tail = tail.getSubAbility()) {
+            if (tail.getManaPart() != null) {
+                parts.add(tail.getManaPart());
+            }
+        }
+        return parts;
     }
 
     /** A fixed amount of damage dealt to the activating player alone — a painland's sub-ability — which an undo gives back. */

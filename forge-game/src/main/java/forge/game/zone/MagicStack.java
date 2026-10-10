@@ -208,6 +208,32 @@ public class MagicStack /* extends MyObservable */ implements Iterable<SpellAbil
         }
         return true;
     }
+    /**
+     * The latest activation on the undo stack hosted by {@code host}, if undoing it now would
+     * succeed (its mana all still floats), else null. Not only the top of the stack: a mana
+     * ability made nothing a later one needs unless its mana was spent, and then it is not undoable.
+     */
+    public final SpellAbility undoableBy(final Card host) {
+        for (int i = undoStack.size() - 1; i >= 0; i--) {
+            final SpellAbility sa = undoStack.get(i);
+            if (sa.getHostCard().equals(host)) {
+                return sa.canUndo() ? sa : null;
+            }
+        }
+        return null;
+    }
+
+    /** Undo {@code host}'s activation out of order ({@link #undoableBy}); false if there is none. */
+    public final boolean undo(final Card host) {
+        final SpellAbility sa = undoableBy(host);
+        if (sa == null || !sa.undo()) {
+            return false;
+        }
+        clearUndoStack(sa);
+        new ManaRefundService(sa).refundManaPaid();
+        return true;
+    }
+
     public final void clearUndoStack(SpellAbility sa) {
         if (sa == null) {
             return;
