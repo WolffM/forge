@@ -285,24 +285,35 @@ public class ManaPool extends ManaConversionMatrix implements Iterable<Mana> {
      * as one: a part that produced nothing (its condition did not hold) asks for nothing.
      */
     public boolean accountFor(final Iterable<AbilityManaPart> parts) {
-        final List<Mana> removeFloating = Lists.newArrayList();
+        final List<Mana> removeFloating = stillFloating(parts);
+        if (removeFloating == null) {
+            return false;
+        }
+        removeMana(removeFloating);
+        return true;
+    }
+
+    /** Whether every Mana these parts last produced still floats — what {@link #accountFor(Iterable)} would take back. */
+    public boolean holdsAll(final Iterable<AbilityManaPart> parts) {
+        return stillFloating(parts) != null;
+    }
+
+    private List<Mana> stillFloating(final Iterable<AbilityManaPart> parts) {
+        final List<Mana> floating = Lists.newArrayList();
         for (AbilityManaPart ma : parts) {
             // loop over mana produced by mana ability
             for (Mana mana : ma.getLastManaProduced()) {
                 Collection<Mana> poolLane = floatingMana.get(mana.getColor());
                 if (poolLane == null || !poolLane.contains(mana)) {
-                    // When is it legitimate for all the mana not to be accountable?
-                    // TODO: Does this condition really indicate an bug in Forge?
-                    return false;
+                    return null;
                 }
-                removeFloating.add(mana);
+                floating.add(mana);
             }
         }
-        if (removeFloating.isEmpty() && floatingMana.isEmpty()) {
-            return false;
+        if (floating.isEmpty() && floatingMana.isEmpty()) {
+            return null;
         }
-        removeMana(removeFloating);
-        return true;
+        return floating;
     }
 
     public void refundMana(List<Mana> manaSpent) {
