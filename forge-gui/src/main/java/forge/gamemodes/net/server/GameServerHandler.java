@@ -1,6 +1,8 @@
 package forge.gamemodes.net.server;
 
 import forge.gamemodes.match.input.ActGate;
+import forge.gamemodes.match.input.Input;
+import forge.gamemodes.match.input.InputLockUI;
 import forge.gamemodes.net.GameProtocolHandler;
 import forge.util.IHasForgeLog;
 import forge.gamemodes.net.IRemote;
@@ -24,6 +26,9 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
             ProtocolMethod.selectButtonOk, ProtocolMethod.selectButtonCancel, ProtocolMethod.useMana,
             ProtocolMethod.undoLastAction, ProtocolMethod.alphaStrike);
 
+    /** The longest an act that came between two inputs is held for the next one. */
+    private static final long BETWEEN_INPUTS_MS = 5_000;
+
     GameServerHandler() {
         super(false);
     }
@@ -33,7 +38,13 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
         if (ACTS.contains(protocolMethod) && getToInvoke(ctx) instanceof PlayerControllerHuman pch) {
             final ActGate gate = ActGate.of(pch.getGame());
             final long ticket = gate.ticket();
-            super.runInBackground(ctx, protocolMethod, () -> gate.run(ticket, toRun));
+            super.runInBackground(ctx, protocolMethod, () -> gate.run(ticket, () -> {
+                gate.settle(() -> {
+                    final Input input = pch.getInputProxy().getInput();
+                    return input != null && !(input instanceof InputLockUI);
+                }, BETWEEN_INPUTS_MS);
+                toRun.run();
+            }));
         } else {
             super.runInBackground(ctx, protocolMethod, toRun);
         }
