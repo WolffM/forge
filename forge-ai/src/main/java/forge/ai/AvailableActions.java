@@ -11,6 +11,7 @@ import forge.game.cost.CostPartMana;
 import forge.game.cost.CostTap;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
+import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
 import forge.game.staticability.StaticAbility;
 import forge.game.staticability.StaticAbilityMode;
@@ -39,22 +40,49 @@ public final class AvailableActions {
             new ZoneScan(ZoneType.Battlefield, false),
             new ZoneScan(ZoneType.Flashback,   true));
 
+    /*
+     * Every entry point is a prediction the game can do without, and each runs on the game thread
+     * (PlayerControllerHuman, every priority window and every click). So none may throw: a card
+     * script this sweep reads wrongly once killed a live match (Nykthos, Shrine to Nyx, 2026-10-11 —
+     * its "{2},{T}: Choose a color" mana ability has no mana part of its own). A failure is logged
+     * with its stack and answered the FP-safe way this class already answers a timeout: assume
+     * playable. "Nothing is playable" would auto-pass a player's window; "everything is" only
+     * highlights too much.
+     */
+
     /** Boolean form: early-exits on the first actionable card. */
     public static boolean compute(Player player, long timeoutMs) {
-        return withAiController(player, () -> !walk(player, timeoutMs, true).isEmpty());
+        try {
+            return withAiController(player, () -> !walk(player, timeoutMs, true).isEmpty());
+        } catch (RuntimeException e) {
+            Logger.error(e, "AvailableActions.compute failed; answering 'actions available'");
+            return true;
+        }
     }
 
     /** Set form: walks every card so highlight consumers can mark the actionable subset. */
     public static Set<CardView> collectActionable(Player player, long timeoutMs) {
-        return withAiController(player, () -> walk(player, timeoutMs, false));
+        try {
+            return withAiController(player, () -> walk(player, timeoutMs, false));
+        } catch (RuntimeException e) {
+            Logger.error(e, "AvailableActions.collectActionable failed; marking every card actionable");
+            Set<CardView> all = new HashSet<>();
+            addUnvisited(all, new HashSet<>(), player);
+            return all;
+        }
     }
 
     /** The abilities a click on a card offers out of {@code abilities}: the ones Forge would take
      *  now, by the same test the highlight uses. A pick from this list is never refused once made. */
     public static List<SpellAbility> offered(Player player, List<SpellAbility> abilities) {
-        return withAiController(player, () -> abilities.stream()
-                .filter(sa -> canTake(sa, player))
-                .collect(Collectors.toList()));
+        try {
+            return withAiController(player, () -> abilities.stream()
+                    .filter(sa -> canTake(sa, player))
+                    .collect(Collectors.toList()));
+        } catch (RuntimeException e) {
+            Logger.error(e, "AvailableActions.offered failed; offering every ability");
+            return abilities;
+        }
     }
 
     /** Run the predictive sweep under an AI controller so cost-adjustment chooseX
@@ -218,13 +246,17 @@ public final class AvailableActions {
             }
             for (SpellAbility ma : rock.getManaAbilities()) {
                 ma.setActivatingPlayer(player);
-                if (!isTapAndManaOnlyManaAbility(ma) || !ma.getPayCosts().hasManaCost() || !ma.canPlay()
-                        || ma.getManaPart().isComboMana() || ma.getManaPart().isAnyMana() || ma.getManaPart().isSpecialMana()) {
+                // A mana ability whose mana comes from a sub-ability has no mana part of its own
+                // (Nykthos, Shrine to Nyx: AB$ ChooseColor | Cost$ 2 T | SubAbility$ DBMana). It is
+                // not a plain rock, so it is left out like any other this cannot read.
+                final AbilityManaPart part = ma.getManaPart();
+                if (part == null || !isTapAndManaOnlyManaAbility(ma) || !ma.getPayCosts().hasManaCost() || !ma.canPlay()
+                        || part.isComboMana() || part.isAnyMana() || part.isSpecialMana()) {
                     continue;
                 }
                 cost.addManaCost(ma.getPayCosts().getTotalMana());
                 final int amount = ma.amountOfManaGenerated(false);
-                for (String colour : ma.getManaPart().mana(ma).split(" ")) {
+                for (String colour : part.mana(ma).split(" ")) {
                     for (int i = 0; i < amount; i++) {
                         cost.ai_payMana(colour, player.getManaPool());
                     }
