@@ -12,6 +12,8 @@ import forge.game.cost.CostTap;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
+import forge.game.staticability.StaticAbility;
+import forge.game.staticability.StaticAbilityMode;
 import forge.game.zone.ZoneType;
 import org.tinylog.Logger;
 
@@ -132,12 +134,33 @@ public final class AvailableActions {
     private static boolean passesRestrictions(SpellAbility sa, Player player) {
         Card host = sa.getHostCard();
         if (sa.isSpell()) {
+            // The copy is the cost, and most spells meet no CantBeCast static at all.
+            if (!anyCantBeCast(host, player)) {
+                return true;
+            }
             host = CardCopyService.getLKICopy(host);
             host.setLKICMC(-1);
             host.setLastKnownZone(player.getGame().getStackZone());
             host.setCastFrom(sa.getHostCard().getZone());
         }
         return sa.checkRestrictions(host, player);
+    }
+
+    /** Whether a CantBeCast static exists where StaticAbilityCantBeCast.cantBeCastAbility looks. */
+    private static boolean anyCantBeCast(Card host, Player player) {
+        for (StaticAbility stAb : host.getStaticAbilities()) {
+            if (stAb.checkMode(StaticAbilityMode.CantBeCast)) {
+                return true;
+            }
+        }
+        for (Card c : player.getGame().getCardsIn(ZoneType.STATIC_ABILITIES_SOURCE_ZONES)) {
+            for (StaticAbility stAb : c.getStaticAbilities()) {
+                if (stAb.checkMode(StaticAbilityMode.CantBeCast)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean isTapAndManaOnlyManaAbility(SpellAbility sa) {
