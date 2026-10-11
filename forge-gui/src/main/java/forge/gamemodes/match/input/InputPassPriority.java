@@ -17,6 +17,7 @@
  */
 package forge.gamemodes.match.input;
 
+import forge.ai.AvailableActions;
 import forge.game.Game;
 import forge.game.GameView;
 import forge.game.card.Card;
@@ -339,6 +340,16 @@ public class InputPassPriority extends InputSyncronizedBase {
         List<SpellAbility> abilities = card.getAllPossibleAbilities(getController().getPlayer(), triggerEvent == null); 
         if (abilities.isEmpty()) {
             return false;
+        }
+        // Offer only what the highlight offers: an ability Forge would refuse once picked (a cost
+        // nothing can pay, a CantBeCast static) is left off the choice. A click with nothing left is
+        // refused where the player can see it.
+        if (triggerEvent == null) {
+            abilities = AvailableActions.offered(getController().getPlayer(), abilities);
+            if (abilities.isEmpty()) {
+                getController().getGui().flashIncorrectAction();
+                return false;
+            }
         }
 
         final SpellAbility ability = getController().getAbilityToPlay(card, abilities, triggerEvent);

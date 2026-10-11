@@ -307,11 +307,11 @@ public class InputAttack extends InputSyncronizedBase {
         }
         getController().getGui().setHighlighted(off, false);
         getController().getGui().setHighlighted(on,  true);
+        // Cleared only on the way out (onOk): the window is not drawn again after its OK.
         if (def != null) {
             potentialBanding = isBandingPossible();
+            updateMessage();
         }
-
-        updateMessage();
     }
 
     private void activateBand(final AttackingBand band) {

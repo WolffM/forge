@@ -2,6 +2,7 @@ package forge.ai;
 
 import forge.card.mana.ManaCost;
 import forge.game.card.Card;
+import forge.game.card.CardCopyService;
 import forge.game.card.CardLists;
 import forge.game.card.CardView;
 import forge.game.cost.Cost;
@@ -44,6 +45,14 @@ public final class AvailableActions {
     /** Set form: walks every card so highlight consumers can mark the actionable subset. */
     public static Set<CardView> collectActionable(Player player, long timeoutMs) {
         return withAiController(player, () -> walk(player, timeoutMs, false));
+    }
+
+    /** The abilities a click on a card offers out of {@code abilities}: the ones Forge would take
+     *  now, by the same test the highlight uses. A pick from this list is never refused once made. */
+    public static List<SpellAbility> offered(Player player, List<SpellAbility> abilities) {
+        return withAiController(player, () -> abilities.stream()
+                .filter(sa -> canTake(sa, player))
+                .collect(Collectors.toList()));
     }
 
     /** Run the predictive sweep under an AI controller so cost-adjustment chooseX
@@ -101,18 +110,34 @@ public final class AvailableActions {
             return true;
         }
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
-            if (sa.isManaAbility()) {
-                if (isTapAndManaOnlyManaAbility(sa) && canAfford(sa, player)
-                        && ComputerUtilAbility.isFullyTargetable(sa)) {
-                    return true;
-                }
+            if (sa.isManaAbility() && !isTapAndManaOnlyManaAbility(sa)) {
                 continue;
             }
-            if (canAfford(sa, player) && ComputerUtilAbility.isFullyTargetable(sa)) {
+            if (canTake(sa, player)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean canTake(SpellAbility sa, Player player) {
+        return canAfford(sa, player) && ComputerUtilAbility.isFullyTargetable(sa) && passesRestrictions(sa, player);
+    }
+
+    // canPlay() leaves out the CantBeCast and CantBeActivated statics ("You can't cast this spell
+    // during your first, second, or third turns of the game"): Forge asks them only once the play
+    // has begun (PlaySpellAbility.playAbility, checkRestrictions), and refuses it there. Ask them
+    // here the way the AI does before it plays (AiController.canPlaySa): of a spell as it would
+    // stand on the stack.
+    private static boolean passesRestrictions(SpellAbility sa, Player player) {
+        Card host = sa.getHostCard();
+        if (sa.isSpell()) {
+            host = CardCopyService.getLKICopy(host);
+            host.setLKICMC(-1);
+            host.setLastKnownZone(player.getGame().getStackZone());
+            host.setCastFrom(sa.getHostCard().getZone());
+        }
+        return sa.checkRestrictions(host, player);
     }
 
     private static boolean isTapAndManaOnlyManaAbility(SpellAbility sa) {
