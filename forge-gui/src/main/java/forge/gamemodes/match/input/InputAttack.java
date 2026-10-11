@@ -291,11 +291,11 @@ public class InputAttack extends InputSyncronizedBase {
 
     private void setCurrentDefender(final GameEntity def) {
         currentDefender = def;
+        // Cleared only on the way out (onOk): the window is not drawn again after its OK.
         if (def != null) {
             potentialBanding = isBandingPossible();
+            updateMessage();
         }
-
-        updateMessage();
     }
 
     /** The defender being attacked and the band being formed. */
