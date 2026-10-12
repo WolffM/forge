@@ -1304,6 +1304,15 @@ public class AbilityUtils {
         Player pl = sa.getActivatingPlayer();
         final Game game = pl.getGame();
 
+        // Each mana part's record of what it made describes THIS resolution. A part that does not
+        // produce now — its condition fails (River of Tears' {U} once a land was played), or a
+        // replacement stops it — would otherwise keep the mana of an earlier activation, already
+        // spent or undone, and every reader of the record (the undo of this activation, paying with
+        // it, Count$AmountManaProduced) would look for mana that is not there.
+        for (AbilityManaPart part : sa.getAllManaParts()) {
+            part.clearLastManaProduced();
+        }
+
         if (sa.isTrigger() && !sa.getTrigger().isStatic() && sa.getParent() == null) {
             // when trigger cost are paid before the effect does resolve, need to clean the trigger
             game.getTriggerHandler().resetActiveTriggers();

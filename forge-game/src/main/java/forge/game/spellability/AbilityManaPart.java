@@ -575,6 +575,11 @@ public class AbilityManaPart implements java.io.Serializable {
         return this.lastManaProduced;
     }
 
+    /** Forget what this part made: it is about to resolve again, and may make nothing this time. */
+    public void clearLastManaProduced() {
+        this.lastManaProduced.clear();
+    }
+
     public final boolean isSnow() {
         return this.getSourceCard().isSnow();
     }
