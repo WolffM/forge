@@ -20,11 +20,16 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
 
     private final FServerManager server = FServerManager.getInstance();
 
-    /** A player's acts on the game's current Input: taken one at a time per game, in arrival order (ActGate). */
+    /**
+     * A player's acts on the game: taken one at a time per game, in arrival order (ActGate), each once
+     * the game waits on an input. A concede is one: it ends the game by walking every card in it, and
+     * run while the game thread moved cards (the opening deal) that walk died with a
+     * ConcurrentModificationException and left the player conceded in a game that was not over.
+     */
     private static final Set<ProtocolMethod> ACTS = EnumSet.of(
             ProtocolMethod.selectCard, ProtocolMethod.selectPlayer, ProtocolMethod.selectAbility,
             ProtocolMethod.selectButtonOk, ProtocolMethod.selectButtonCancel, ProtocolMethod.useMana,
-            ProtocolMethod.undoLastAction, ProtocolMethod.alphaStrike);
+            ProtocolMethod.undoLastAction, ProtocolMethod.alphaStrike, ProtocolMethod.concede);
 
     /** The longest an act that came between two inputs is held for the next one. */
     private static final long BETWEEN_INPUTS_MS = 5_000;
@@ -40,6 +45,9 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
             final long ticket = gate.ticket();
             super.runInBackground(ctx, protocolMethod, () -> gate.run(ticket, () -> {
                 gate.settle(() -> {
+                    if (pch.getGame().isGameOver()) {
+                        return true;
+                    }
                     final Input input = pch.getInputProxy().getInput();
                     return input != null && !(input instanceof InputLockUI);
                 }, BETWEEN_INPUTS_MS);
