@@ -53,22 +53,38 @@ public final class AvailableActions {
     /** Boolean form: early-exits on the first actionable card. */
     public static boolean compute(Player player, long timeoutMs) {
         try {
-            return withAiController(player, () -> !walk(player, timeoutMs, true).isEmpty());
+            return withAiController(player, () -> !walk(player, timeoutMs, true).actionable().isEmpty());
         } catch (RuntimeException e) {
             Logger.error(e, "AvailableActions.compute failed; answering 'actions available'");
             return true;
         }
     }
 
+    /**
+     * One full walk: {@code actionable} is every card the highlight marks; {@code plays} is the
+     * subset with something to take besides a mana ability — a spell, a land drop, a non-mana
+     * ability that is affordable, targetable and allowed. A card in {@code actionable} but not in
+     * {@code plays} is offered for its mana alone (or for the undo of a mana tap): a Forest, a
+     * Signet, a Celestial Colonnade whose animation its controller cannot pay for. Both sets are
+     * read off the same {@link #canTake} test, on the game thread, so a reader elsewhere never
+     * has to run the AI controller swap itself.
+     */
+    public record Scan(Set<CardView> actionable, Set<CardView> plays) {}
+
     /** Set form: walks every card so highlight consumers can mark the actionable subset. */
     public static Set<CardView> collectActionable(Player player, long timeoutMs) {
+        return scan(player, timeoutMs).actionable();
+    }
+
+    /** {@link #collectActionable}, with the cards that are a play besides their mana. */
+    public static Scan scan(Player player, long timeoutMs) {
         try {
             return withAiController(player, () -> walk(player, timeoutMs, false));
         } catch (RuntimeException e) {
-            Logger.error(e, "AvailableActions.collectActionable failed; marking every card actionable");
+            Logger.error(e, "AvailableActions.scan failed; marking every card actionable and a play");
             Set<CardView> all = new HashSet<>();
             addUnvisited(all, new HashSet<>(), player);
-            return all;
+            return new Scan(all, all);
         }
     }
 
@@ -95,9 +111,14 @@ public final class AvailableActions {
         return result.get();
     }
 
-    private static Set<CardView> walk(Player player, long timeoutMs, boolean earlyExit) {
+    /**
+     * Every card with something the player would take, and among them the plays (see {@link Scan}).
+     * {@code earlyExit} stops at the first actionable card and records no plays.
+     */
+    private static Scan walk(Player player, long timeoutMs, boolean earlyExit) {
         long deadlineNanos = System.nanoTime() + timeoutMs * 1_000_000L;
         Set<CardView> actionable = new HashSet<>();
+        Set<CardView> plays = new HashSet<>();
         Set<CardView> visited = new HashSet<>();
 
         for (ZoneScan scan : SCANS) {
@@ -106,18 +127,35 @@ public final class AvailableActions {
                     : player.getCardsIn(scan.zone());
             for (Card card : cards) {
                 if (checkTimeout(deadlineNanos, timeoutMs)) {
-                    addUnvisited(actionable, visited, player);
-                    return actionable;
+                    // Unvisited: FP-safe, as the highlight is — a play until shown otherwise.
+                    Set<CardView> unvisited = new HashSet<>();
+                    addUnvisited(unvisited, visited, player);
+                    actionable.addAll(unvisited);
+                    plays.addAll(unvisited);
+                    return new Scan(actionable, plays);
                 }
                 CardView cv = card.getView();
                 visited.add(cv);
                 if (cardHasActionable(card, player)) {
                     actionable.add(cv);
-                    if (earlyExit) return actionable;
+                    if (earlyExit) return new Scan(actionable, plays);
+                    if (cardHasPlay(card, player)) {
+                        plays.add(cv);
+                    }
                 }
             }
         }
-        return actionable;
+        return new Scan(actionable, plays);
+    }
+
+    /** Something the player would take on this card that is not a mana ability. */
+    private static boolean cardHasPlay(Card card, Player player) {
+        for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
+            if (!sa.isManaAbility() && canTake(sa, player)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Land plays come through with no cost, no targets; spells and activated abilities (incl.
