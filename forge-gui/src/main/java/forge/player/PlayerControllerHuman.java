@@ -1548,8 +1548,8 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         return actionablePlays;
     }
 
-    /** Push the actionable-card set to the GUI. Payment mode falls back to the
-     *  "playable mana ability" predicate; non-payment reuses {@link #cachedActionableCards}. */
+    /** Push the actionable-card set to the GUI. Payment mode offers the sources the open
+     *  payment would take; non-payment reuses {@link #cachedActionableCards}. */
     public void pushActionableCards(boolean paymentMode) {
         pushActionableCards(paymentMode, null);
     }
@@ -1570,12 +1570,16 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         final Set<CardView> actionable = Sets.newHashSet();
         if (showActionable) {
             if (paymentMode) {
-                // Snapshot each zone: the payment prompt refreshes on the EDT while the
-                // game thread can remove cards (e.g. Squandered Resources sacrificing a land).
-                for (ZoneType zone : ACTIONABLE_PAYMENT_ZONES) {
-                    for (Card c : player.getCardsIn(zone).threadSafeIterable()) {
-                        if (cardHasPlayableManaAbility(c)) {
-                            actionable.add(c.getView());
+                // Only a source a click would pay with (InputPayMana.paysWith): two Islands are no
+                // way to pay {R}{R}, and offering them hid that nothing could.
+                if (inputQueue.getInput() instanceof InputPayMana payment) {
+                    // Snapshot each zone: the payment prompt refreshes on the EDT while the
+                    // game thread can remove cards (e.g. Squandered Resources sacrificing a land).
+                    for (ZoneType zone : ACTIONABLE_PAYMENT_ZONES) {
+                        for (Card c : player.getCardsIn(zone).threadSafeIterable()) {
+                            if (payment.paysWith(c)) {
+                                actionable.add(c.getView());
+                            }
                         }
                     }
                 }
@@ -1600,13 +1604,6 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
             }
         }
         getGui().setWeaklySelectable(weighted);
-    }
-
-    private boolean cardHasPlayableManaAbility(Card c) {
-        for (SpellAbility sa : c.getAllPossibleAbilities(player, true)) {
-            if (sa.isManaAbility()) return true;
-        }
-        return false;
     }
 
     public void clearActionableCards() {

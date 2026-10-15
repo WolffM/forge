@@ -160,14 +160,8 @@ public abstract class InputPayMana extends InputSyncronizedBase {
         return false;
     }
 
-    @Deprecated
-    public List<SpellAbility> getUsefulManaAbilities(Card card) {
-        List<SpellAbility> abilities = new ArrayList<>();
-
-        if (card.getController() != player) {
-            return abilities;
-        }
-
+    /** The colours (and generic) some part of the remaining cost can still be paid with, after the pool. */
+    private byte colorsPayable() {
         byte colorCanUse = 0;
         for (final byte color : ManaAtom.MANATYPES) {
             if (manaCost.isAnyPartPayableWith(color, player.getManaPool())) {
@@ -177,21 +171,28 @@ public abstract class InputPayMana extends InputSyncronizedBase {
         if (manaCost.isAnyPartPayableWith((byte) ManaAtom.GENERIC, player.getManaPool())) {
             colorCanUse |= ManaAtom.GENERIC;
         }
-        if (colorCanUse == 0) { // no mana cost or something
-            return abilities;
+        return colorCanUse;
+    }
+
+    /**
+     * Whether a click on {@code card} would pay toward the remaining cost: one of its mana abilities
+     * makes mana some part of it takes, the same test {@link #activateManaAbility} applies to the
+     * click. What the payment highlight offers ({@code PlayerControllerHuman.pushActionableCards}).
+     */
+    public boolean paysWith(final Card card) {
+        if (card.getController() != player) {
+            return false;
         }
-
-        //        final String typeRes = manaCost.getSourceRestriction();
-        //        if (StringUtils.isNotBlank(typeRes) && !card.getType().hasStringType(typeRes)) {
-        //            return abilities;
-        //        }
-
+        final byte colorCanUse = colorsPayable();
+        if (colorCanUse == 0) {
+            return false;
+        }
         for (SpellAbility ma : getAllManaAbilities(card)) {
-            ma.setActivatingPlayer(player);
-            if (ma.isManaAbilityFor(saPaidFor, colorCanUse))
-                abilities.add(ma);
+            if (ma.isManaAbilityFor(saPaidFor, colorCanUse)) {
+                return true;
+            }
         }
-        return abilities;
+        return false;
     }
 
     public void useManaFromPool(byte colorCode) {
@@ -214,15 +215,10 @@ public abstract class InputPayMana extends InputSyncronizedBase {
 
         // make sure computer's lands aren't selected
 
-        byte colorCanUse = 0;
+        byte colorCanUse = colorsPayable();
         byte colorNeeded = 0;
-
         for (final byte color : ManaAtom.MANATYPES) {
-            if (manaCost.isAnyPartPayableWith(color, player.getManaPool())) { colorCanUse |= color; }
-            if (manaCost.needsColor(color, player.getManaPool()))           { colorNeeded |= color; }
-        }
-        if (manaCost.isAnyPartPayableWith((byte) ManaAtom.GENERIC, player.getManaPool())) {
-            colorCanUse |= ManaAtom.GENERIC;
+            if (manaCost.needsColor(color, player.getManaPool())) { colorNeeded |= color; }
         }
 
         if (colorCanUse == 0) { // no mana cost or something
