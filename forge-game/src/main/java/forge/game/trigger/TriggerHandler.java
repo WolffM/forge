@@ -578,7 +578,7 @@ public class TriggerHandler {
             effect = AbilityFactory.getAbility(regtrig.getHostCard(), name);
         }
         for (SpellAbility part = effect; part != null; part = part.getSubAbility()) {
-            if (part.getApi() != ApiType.Mana || part.getPayCosts() != null && !part.getPayCosts().getCostParts().isEmpty()) {
+            if (part.getApi() != ApiType.Mana || part.hasParam("Cost")) {
                 return false;
             }
         }
