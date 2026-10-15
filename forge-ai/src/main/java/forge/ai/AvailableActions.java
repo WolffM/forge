@@ -1,6 +1,7 @@
 package forge.ai;
 
 import forge.card.mana.ManaCost;
+import forge.game.GameEntity;
 import forge.game.card.Card;
 import forge.game.card.CardCopyService;
 import forge.game.card.CardLists;
@@ -13,11 +14,14 @@ import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
 import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
+import forge.game.spellability.TargetChoices;
+import forge.game.spellability.TargetRestrictions;
 import forge.game.staticability.StaticAbility;
 import forge.game.staticability.StaticAbilityMode;
 import forge.game.zone.ZoneType;
 import org.tinylog.Logger;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -159,28 +163,20 @@ public final class AvailableActions {
     }
 
     // Land plays come through with no cost, no targets; spells and activated abilities (incl.
-    // hand-activations like Channel) all hit the same shape: not a mana ability, affordable, targetable.
+    // hand-activations like Channel) all hit the same shape: affordable, targetable, allowed.
     //
-    // Desktop Forge lets a player tap lands freely before casting anything; our click filter
-    // used to hide every mana ability (R15), so a land was never offered at priority. A mana
-    // ability whose only cost is tapping (a basic land's, a dual's) is offered, and so is one
-    // that adds a mana payment to the tap (a Signet's {1},{T}) when that mana can be paid now,
-    // from the pool or another source — the same mana ability the payment prompt offers. A mana
-    // ability with any other cost (pay life, sacrifice — painlands, Lotus Petal) stays excluded
-    // until there's a real case to shape around; the player reaches those through the payment
-    // prompt.
+    // Desktop Forge lets a player activate a mana ability at any priority, so every one Forge would
+    // take now is offered, whatever its cost: a land's {T}, a Signet's {1},{T} when that {1} can be
+    // paid, Mana Confluence's life, Lion's Eye Diamond's sacrifice and discard.
     //
     // A permanent tapped for mana whose mana still floats is offered too: a click on it untaps it
-    // (InputPassPriority.onCardSelected → PlayerControllerHuman.tryUndo), in any order.
+    // (InputPassPriority.onCardSelected -> PlayerControllerHuman.tryUndo), in any order.
     private static boolean cardHasActionable(Card card, Player player) {
         if (card.isTapped() && player.getGame().getStack().canUndo(player)
                 && player.getGame().getStack().undoableBy(card) != null) {
             return true;
         }
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
-            if (sa.isManaAbility() && !isTapAndManaOnlyManaAbility(sa)) {
-                continue;
-            }
             if (canTake(sa, player)) {
                 return true;
             }
@@ -189,7 +185,68 @@ public final class AvailableActions {
     }
 
     private static boolean canTake(SpellAbility sa, Player player) {
-        return canAfford(sa, player) && ComputerUtilAbility.isFullyTargetable(sa) && passesRestrictions(sa, player);
+        return canAfford(sa, player) && isTargetable(sa) && passesRestrictions(sa, player);
+    }
+
+    /** Candidates tried per ability before the answer is assumed (FP-safe, as a timeout is). */
+    private static final int TARGET_TRIES = 64;
+
+    /**
+     * Whether every part of the chain that must target has enough candidates. A part's candidates
+     * can depend on what an earlier part targets (Searing Blaze: "target creature that player
+     * controls", Creature.ControlledBy ParentTargetedController), which no candidate count can see
+     * with nothing targeted yet. So each earlier part is given each of its candidates in turn, the
+     * way the player will pick it; resetTargets gives each try a fresh choice, so the originals are
+     * put back untouched.
+     */
+    private static boolean isTargetable(SpellAbility sa) {
+        final List<SpellAbility> chain = new ArrayList<>();
+        for (SpellAbility part = sa; part != null; part = part.getSubAbility()) {
+            if (part.usesTargeting() && part.getMinTargets() > 0) {
+                chain.add(part);
+            }
+        }
+        if (chain.isEmpty()) {
+            return true;
+        }
+        final List<TargetChoices> before = new ArrayList<>();
+        for (SpellAbility part : chain) {
+            before.add(part.getTargets());
+        }
+        try {
+            return isTargetable(chain, 0, new int[] {TARGET_TRIES});
+        } finally {
+            for (int i = 0; i < chain.size(); i++) {
+                chain.get(i).setTargets(before.get(i));
+            }
+        }
+    }
+
+    private static boolean isTargetable(List<SpellAbility> chain, int at, int[] tries) {
+        final SpellAbility part = chain.get(at);
+        final TargetRestrictions tgt = part.getTargetRestrictions();
+        if (tgt.getNumCandidates(part) < part.getMinTargets()) {
+            return false;
+        }
+        if (at == chain.size() - 1) {
+            return true;
+        }
+        final List<GameEntity> candidates = tgt.getAllCandidates(part);
+        if (candidates.isEmpty()) {
+            // Its candidates are spells on the stack, which no later part reads.
+            return isTargetable(chain, at + 1, tries);
+        }
+        for (GameEntity candidate : candidates) {
+            if (--tries[0] < 0) {
+                return true;
+            }
+            part.resetTargets();
+            part.getTargets().add(candidate);
+            if (isTargetable(chain, at + 1, tries)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // canPlay() leaves out the CantBeCast and CantBeActivated statics ("You can't cast this spell
