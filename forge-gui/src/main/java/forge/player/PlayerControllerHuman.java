@@ -1637,12 +1637,16 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         final Set<CardView> actionable = Sets.newHashSet();
         if (showActionable) {
             if (paymentMode) {
-                // Snapshot each zone: the payment prompt refreshes on the EDT while the
-                // game thread can remove cards (e.g. Squandered Resources sacrificing a land).
-                for (ZoneType zone : ACTIONABLE_PAYMENT_ZONES) {
-                    for (Card c : player.getCardsIn(zone).threadSafeIterable()) {
-                        if (cardHasPlayableManaAbility(c)) {
-                            actionable.add(c.getView());
+                // Only a source a click would pay with (InputPayMana.paysWith): two Islands are no
+                // way to pay {R}{R}, and offering them hid that nothing could.
+                if (inputQueue.getInput() instanceof InputPayMana payment) {
+                    // Snapshot each zone: the payment prompt refreshes on the EDT while the
+                    // game thread can remove cards (e.g. Squandered Resources sacrificing a land).
+                    for (ZoneType zone : ACTIONABLE_PAYMENT_ZONES) {
+                        for (Card c : player.getCardsIn(zone).threadSafeIterable()) {
+                            if (payment.paysWith(c)) {
+                                actionable.add(c.getView());
+                            }
                         }
                     }
                 }
@@ -1667,14 +1671,6 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
             }
         }
         return weighted;
-    }
-
-    /** Runs on the EDT while the game thread may be tapping sources, so it must stay read-only.
-     *  Card#getAllPossibleAbilities is not: for spells it can run a full checkStaticAbilities
-     *  (stack look-ahead in GameActionUtil#getAlternativeCosts), which walks the zone lists and
-     *  rewrites layer state. Use the same mana-ability predicate the payment input uses for clicks. */
-    private boolean cardHasPlayableManaAbility(Card c) {
-        return !InputPayMana.getAllManaAbilities(c, player).isEmpty();
     }
 
     /** Undeclared, legal attacker candidates. */
