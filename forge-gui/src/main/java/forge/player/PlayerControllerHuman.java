@@ -1501,7 +1501,23 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
     public CardCollectionView tuckCardsViaMulligan(CardCollectionView hand, int cardsToReturn) {
         final InputLondonMulligan inp = new InputLondonMulligan(this, player, cardsToReturn);
         inp.showAndWait();
-        return inp.getSelectedCards();
+        final CardCollectionView tucked = inp.getSelectedCards();
+        if (tucked.size() < 2) {
+            return tucked;
+        }
+        // The owner puts these on the bottom of the library in any order (rule 103.5), so ask it. The
+        // callers put them under the library one after another (LondonMulligan/HoustonMulligan.keep:
+        // moveToLibrary(c, -1)), so the first card of the answer ends up highest: ask closest-to-top
+        // first and do not reverse, unlike orderMoveToZoneList, whose top-of-library callers insert at 0.
+        final GameEntityViewMap<Card, CardView> gameCacheTuck = GameEntityView.getMap(tucked);
+        final List<CardView> ordered = getGui().order(localizer.getMessage("lblChooseOrderCardsPutIntoLibrary"),
+                localizer.getMessage("lblClosestToTop"), gameCacheTuck.getTrackableKeys(), null);
+        if (ordered == null || ordered.size() != tucked.size()) {
+            return tucked;
+        }
+        final CardCollection result = new CardCollection();
+        gameCacheTuck.addToList(ordered, result);
+        return result;
     }
 
     @Override
