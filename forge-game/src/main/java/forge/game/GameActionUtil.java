@@ -850,6 +850,31 @@ public final class GameActionUtil {
         return sb.toString().trim();
     }
 
+    /**
+     * Whether undoing this mana ability's activation can take back all it did. It is undone by
+     * taking back exactly the mana it made (SpellAbility.undo() reads each part's
+     * getLastManaProduced(), so a variable amount — Urza's Mine — a conditional Mana sub-ability —
+     * River of Tears — and reflected mana — Fellwar Stone — need nothing more) and refunding its
+     * cost. What the undo cannot take back is a sub-ability that does something else (a draw); the
+     * one it can is a painland's fixed damage to the activator, which SpellAbility.undo() gives
+     * back. A trigger the activation fired is TriggerHandler's to judge.
+     *
+     * Asked when the ability resolves, never while describing or predicting its mana: generatedMana
+     * once decided this as a side effect, so the AI payer's prediction behind every highlight
+     * (ComputerUtilMana.predictMana) made a Fellwar Stone not undoable before it was ever tapped.
+     */
+    public static boolean isUndoableManaChain(final SpellAbility sa) {
+        for (SpellAbility tail = sa; tail != null; tail = tail.getSubAbility()) {
+            if (SpellAbility.isSelfPain(tail)) {
+                continue;
+            }
+            if (tail.getApi() != ApiType.Mana && tail.getApi() != ApiType.ManaReflected) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static String generatedMana(final SpellAbility sa) {
         AbilityManaPart abMana = sa.getManaPart();
         if (abMana == null) {
@@ -873,22 +898,6 @@ public final class GameActionUtil {
             baseMana = abMana.getExpressChoice();
         } else {
             baseMana = abMana.mana(sa);
-        }
-
-        // A mana ability is undone by taking back exactly the mana it made (SpellAbility.undo() reads
-        // each part's getLastManaProduced(), so a variable amount — Urza's Mine — and a conditional
-        // Mana sub-ability — River of Tears — need nothing more) and refunding its cost. What the undo
-        // cannot take back is a sub-ability that does something else (a draw); the one it can is a
-        // painland's fixed damage to the activator, which SpellAbility.undo() gives back. A trigger
-        // the activation fired marks it not undoable on its own (TriggerHandler.adjustUndoStack).
-        for (SpellAbility tail = sa; tail != null; tail = tail.getSubAbility()) {
-            if (SpellAbility.isSelfPain(tail)) {
-                continue;
-            }
-            if (tail.getApi() != ApiType.Mana) {
-                sa.setUndoable(false);
-                break;
-            }
         }
 
         final StringBuilder sb = new StringBuilder();

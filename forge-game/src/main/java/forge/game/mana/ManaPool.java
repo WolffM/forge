@@ -310,9 +310,8 @@ public class ManaPool extends ManaConversionMatrix implements Iterable<Mana> {
                 floating.add(mana);
             }
         }
-        if (floating.isEmpty() && floatingMana.isEmpty()) {
-            return null;
-        }
+        // An activation that made no mana (a Fellwar Stone with no coloured land to reflect) has
+        // nothing to take back, whatever else floats.
         return floating;
     }
 

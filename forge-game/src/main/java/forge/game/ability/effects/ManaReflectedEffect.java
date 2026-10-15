@@ -7,6 +7,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import forge.card.ColorSet;
 import forge.card.MagicColor;
+import forge.game.GameActionUtil;
 import forge.game.ability.AbilityUtils;
 import forge.game.ability.SpellAbilityEffect;
 import forge.game.card.CardUtil;
@@ -35,7 +36,7 @@ public class ManaReflectedEffect extends SpellAbilityEffect {
         final AbilityManaPart ma = sa.getManaPart();
 
         // Spells are not undoable
-        sa.setUndoable(sa.isAbility() && sa.isUndoable() && sa.getSubAbility() == null);
+        sa.setUndoable(sa.isAbility() && sa.isUndoable() && GameActionUtil.isUndoableManaChain(sa));
 
         final StringBuilder producedMana = new StringBuilder();
         for (final Player player : getTargetPlayers(sa)) {

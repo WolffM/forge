@@ -47,7 +47,8 @@ public class ManaEffect extends SpellAbilityEffect {
         final Player activator = sa.getActivatingPlayer();
 
         // Spells are not undoable
-        sa.setUndoable(sa.isAbility() && sa.isUndoable() && tgtPlayers.size() < 2 && !sa.hasParam("ActivationLimit"));
+        sa.setUndoable(sa.isAbility() && sa.isUndoable() && tgtPlayers.size() < 2 && !sa.hasParam("ActivationLimit")
+                && GameActionUtil.isUndoableManaChain(sa));
 
         if (sa.hasParam("Optional") && !activator.getController().confirmAction(sa, null, Localizer.getInstance().getMessage("lblDoYouWantAddMana"), null)) {
             return;
