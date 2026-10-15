@@ -1743,12 +1743,17 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
         return isUndoable() && getActivatingPlayer().getManaPool().holdsAll(manaParts());
     }
 
-    /** The mana may have come from a sub-ability (River of Tears' {B}): every part of the chain that produced. */
+    /**
+     * The mana may have come from a sub-ability (River of Tears' {B}): every part of the chain that
+     * produced, and every mana trigger a part fired (High Tide's extra {U}), whose mana is taken back
+     * with it.
+     */
     private List<AbilityManaPart> manaParts() {
         List<AbilityManaPart> parts = Lists.newArrayList();
         for (SpellAbility tail = this; tail != null; tail = tail.getSubAbility()) {
             if (tail.getManaPart() != null) {
                 parts.add(tail.getManaPart());
+                parts.addAll(tail.getManaPart().getLastTriggeredMana());
             }
         }
         return parts;

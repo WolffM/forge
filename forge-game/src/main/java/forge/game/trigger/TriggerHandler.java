@@ -28,8 +28,10 @@ import forge.game.IHasSVars;
 import forge.game.ability.AbilityFactory;
 import forge.game.ability.AbilityKey;
 import forge.game.ability.AbilityUtils;
+import forge.game.ability.ApiType;
 import forge.game.card.*;
 import forge.game.player.Player;
+import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.AbilitySub;
 import forge.game.spellability.SpellAbility;
 import forge.game.staticability.StaticAbilityDisableTriggers;
@@ -456,7 +458,10 @@ public class TriggerHandler {
     private void runSingleTriggerInternal(final Trigger regtrig, final Map<AbilityKey, Object> runParams, Player controller) {
         // All tests passed, execute ability.
 
-        adjustUndoStack(regtrig, runParams);
+        final boolean undoableMana = isUndoableManaTrigger(regtrig, runParams);
+        if (!undoableMana) {
+            adjustUndoStack(regtrig, runParams);
+        }
 
         Card host = regtrig.getHostCard();
         SpellAbility sa = regtrig.getOverridingAbility();
@@ -521,6 +526,12 @@ public class TriggerHandler {
 
         if (regtrig.isStatic()) {
             if (wrapperAbility.getActivatingPlayer().getController().playTrigger(host, wrapperAbility, isMandatory)) {
+                if (undoableMana) {
+                    final AbilityManaPart tapped = ((SpellAbility) runParams.get(AbilityKey.AbilityMana)).getManaPart();
+                    for (AbilityManaPart added : sa.getAllManaParts()) {
+                        tapped.addTriggeredMana(added);
+                    }
+                }
                 final Map<AbilityKey, Object> staticParams = AbilityKey.mapFromCard(host);
                 staticParams.put(AbilityKey.SpellAbility, sa);
                 game.getTriggerHandler().runTrigger(TriggerType.AbilityResolves, staticParams, false);
@@ -541,6 +552,37 @@ public class TriggerHandler {
         if (regtrig.hasParam("OneOff") && host.isImmutable() || removeBoon) {
             host.getController().getZone(ZoneType.Command).remove(host);
         }
+    }
+
+    /**
+     * A mana ability's own mana trigger that only adds mana (High Tide: "whenever a player taps an
+     * Island for mana, that player adds an additional {U}", Static$ True) resolves inside the
+     * activation, so undoing the activation can take its mana back too ({@link
+     * AbilityManaPart#addTriggeredMana}) instead of making the activation not undoable. Anything
+     * else the trigger does could not be taken back.
+     */
+    private boolean isUndoableManaTrigger(Trigger regtrig, Map<AbilityKey, Object> runParams) {
+        if (regtrig.getMode() != TriggerType.TapsForMana || !regtrig.isStatic() || regtrig.hasParam("OptionalDecider")) {
+            return false;
+        }
+        final SpellAbility abMana = (SpellAbility) runParams.get(AbilityKey.AbilityMana);
+        if (abMana == null || abMana.getManaPart() == null) {
+            return false;
+        }
+        SpellAbility effect = regtrig.getOverridingAbility();
+        if (effect == null) {
+            final String name = regtrig.getParam("Execute");
+            if (name == null || !regtrig.getHostCard().getCurrentState().hasSVar(name)) {
+                return false;
+            }
+            effect = AbilityFactory.getAbility(regtrig.getHostCard(), name);
+        }
+        for (SpellAbility part = effect; part != null; part = part.getSubAbility()) {
+            if (part.getApi() != ApiType.Mana || part.getPayCosts() != null && !part.getPayCosts().getCostParts().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void adjustUndoStack(Trigger regtrig, Map<AbilityKey, Object> runParams) {

@@ -18,6 +18,7 @@
 package forge.game.spellability;
 
 import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
 
@@ -83,6 +84,8 @@ public class AbilityManaPart implements java.io.Serializable {
     private final boolean combatMana;
 
     private transient Multiset<Mana> lastManaProduced = HashMultiset.create();
+    /** The mana parts of mana triggers this part's last production fired (High Tide's extra {U}). */
+    private transient List<AbilityManaPart> lastTriggeredMana = Lists.newArrayList();
 
     private transient Card sourceCard;
     private transient IHasSVars sVarHolder;
@@ -179,7 +182,7 @@ public class AbilityManaPart implements java.io.Serializable {
         }
 
         //clear lastProduced
-        this.lastManaProduced.clear();
+        clearLastManaProduced();
 
         // TODO use MagicColor
         Map<Byte, Mana> manaHolder = Maps.newHashMap();
@@ -578,6 +581,16 @@ public class AbilityManaPart implements java.io.Serializable {
     /** Forget what this part made: it is about to resolve again, and may make nothing this time. */
     public void clearLastManaProduced() {
         this.lastManaProduced.clear();
+        this.lastTriggeredMana.clear();
+    }
+
+    /** A mana trigger fired by this part's last production, whose mana an undo takes back with it. */
+    public void addTriggeredMana(final AbilityManaPart triggered) {
+        this.lastTriggeredMana.add(triggered);
+    }
+
+    public List<AbilityManaPart> getLastTriggeredMana() {
+        return this.lastTriggeredMana;
     }
 
     public final boolean isSnow() {
