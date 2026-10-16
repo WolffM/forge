@@ -1479,6 +1479,7 @@ public class GameAction {
                     // Rule 704.5f - Put into grave (no regeneration) for toughness <= 0
                     if (c.getNetToughness() <= 0) {
                         noRegCreats.add(c);
+                        stateDeathCauses.put(c, GameEventCardDied.Cause.ZERO_TOUGHNESS);
                         checkAgainCard = true;
                     } else if (c.hasKeyword(Keyword.INDESTRUCTIBLE)) {
                         //702.12b. A permanent with indestructible can't be destroyed.
@@ -1490,6 +1491,7 @@ public class GameAction {
                                 desCreats = new CardCollection();
                             }
                             desCreats.add(c);
+                            stateDeathCauses.put(c, c.hasBeenDealtDeathtouchDamage() ? GameEventCardDied.Cause.DEATHTOUCH : GameEventCardDied.Cause.LETHAL_DAMAGE);
                             c.setHasBeenDealtDeathtouchDamage(false);
                             checkAgainCard = true;
                         }
@@ -1501,6 +1503,7 @@ public class GameAction {
                             desCreats = new CardCollection();
                         }
                         desCreats.add(c);
+                        stateDeathCauses.put(c, c.hasBeenDealtDeathtouchDamage() ? GameEventCardDied.Cause.DEATHTOUCH : GameEventCardDied.Cause.LETHAL_DAMAGE);
                         c.setHasBeenDealtDeathtouchDamage(false);
                         checkAgainCard = true;
                     }
@@ -1593,7 +1596,10 @@ public class GameAction {
                 orderedNoRegCreats = true;
             }
             for (Card c : noRegCreats) {
-                sacrificeDestroy(c, null, mapParams);
+                final GameEventCardDied.Cause cause = stateDeathCauses.remove(c);
+                if (sacrificeDestroy(c, null, mapParams) != null) {
+                    died(c, cause != null ? cause : GameEventCardDied.Cause.STATE_RULE);
+                }
             }
 
             if (desCreats != null) {
@@ -1608,6 +1614,8 @@ public class GameAction {
                     destroy(c, null, true, mapParams);
                 }
             }
+            // A card the rules marked but that never moved (indestructible by now, regenerated) keeps no cause.
+            stateDeathCauses.clear();
 
             if (sacrificeList.size() > 1 && !orderedSacrificeList) {
                 sacrificeList = (CardCollection) GameActionUtil.orderCardsByTheirOwners(game, sacrificeList, ZoneType.Graveyard, null);
@@ -2157,6 +2165,7 @@ public class GameAction {
             Card changed = sacrificeDestroy(c, source, params);
             if (changed != null) {
                 result.add(changed);
+                died(c, GameEventCardDied.Cause.SACRIFICED);
             }
             if (showRevealDialog) {
                 final String message = Localizer.getInstance().getMessage("lblSacrifice");
@@ -2203,7 +2212,22 @@ public class GameAction {
         game.getTriggerHandler().runTrigger(TriggerType.Destroyed, runParams, false);
 
         final Card sacrificed = sacrificeDestroy(c, sa, params);
+        final GameEventCardDied.Cause stateCause = stateDeathCauses.remove(c);
+        if (sacrificed != null) {
+            died(c, stateCause != null ? stateCause : GameEventCardDied.Cause.DESTROYED);
+        }
         return sacrificed != null;
+    }
+
+    /**
+     * Why each card the state-based actions are about to put into a graveyard goes there, for its
+     * {@link GameEventCardDied}: set where the rule is checked, read once where the card moves.
+     */
+    private final Map<Card, GameEventCardDied.Cause> stateDeathCauses = Maps.newHashMap();
+
+    /** {@code c} has gone to the graveyard from the battlefield for {@code cause}. */
+    private void died(final Card c, final GameEventCardDied.Cause cause) {
+        game.fireEvent(new GameEventCardDied(CardView.get(c), cause));
     }
 
     /**
