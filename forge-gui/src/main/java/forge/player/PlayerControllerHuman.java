@@ -366,8 +366,24 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         return result;
     }
 
+    /** The ability whose number {@link #announceRequirements} is asking for while that ask is open; null otherwise. */
+    private volatile SpellAbility announcing;
+
+    public SpellAbility getAnnouncing() {
+        return announcing;
+    }
+
     @Override
     public Integer announceRequirements(final SpellAbility ability, int min, int max, final String announce) {
+        announcing = ability;
+        try {
+            return announceRequirementsFor(ability, min, max, announce);
+        } finally {
+            announcing = null;
+        }
+    }
+
+    private Integer announceRequirementsFor(final SpellAbility ability, int min, int max, final String announce) {
         final Card host = ability.getHostCard();
         Cost cost = ability.getPayCosts();
 
