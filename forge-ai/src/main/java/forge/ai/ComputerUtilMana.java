@@ -637,6 +637,13 @@ public class ComputerUtilMana {
         boolean purePhyrexian = cost.containsOnlyPhyrexianMana();
         boolean hasConverge = sa.getHostCard().hasConverge();
         ListMultimap<ManaCostShard, SpellAbility> sourcesForShards = getSourcesForShards(cost, sa, ai, test, checkPlayable, hasConverge);
+        // Every mana ability this payment looks at is left producing what it produced before.
+        // canPayShardWithSpellAbility writes a candidate's express choice before the candidate can
+        // still be turned down (Black Lotus's AILogic, a sacrifice or tap already spoken for), and a
+        // test payment uses nothing at all. A choice left behind on a human's "any color" source is
+        // read by ManaEffect as that player's answer to "Select Mana to Produce" the next time they
+        // tap it, so the question is never asked.
+        final Map<AbilityManaPart, String> expressBefore = expressChoices(sourcesForShards);
 
         int testEnergyPool = ai.getCounters(CounterEnumType.ENERGY);
         ManaCostShard toPay = null;
@@ -799,8 +806,8 @@ public class ComputerUtilMana {
         // The cost is still unpaid, so refund the mana and report
         if (!cost.isPaid()) {
             manapool.refundMana(manaSpentToPay);
+            restoreExpressChoices(expressBefore);
             if (test) {
-                resetPayment(paymentList);
                 // TODO should probably only record when canPlayAndPayFor
                 // TODO doesn't count multiple copies filtered by dedupeCards
                 Set<ManaCostBeingPaid> unpaid = AiCardMemory.getMemorySet(ai, AiCardMemory.MemorySetMana.UNPAID_COSTS);
@@ -814,18 +821,29 @@ public class ComputerUtilMana {
             return null;
         }
 
+        restoreExpressChoices(expressBefore);
         if (test) {
             manapool.refundMana(manaSpentToPay);
-            resetPayment(paymentList);
         }
 
         return paymentList;
     }
 
-    private static void resetPayment(List<SpellAbility> payments) {
-        for (SpellAbility sa : payments) {
-            sa.getManaPart().clearExpressChoice();
+    private static Map<AbilityManaPart, String> expressChoices(final ListMultimap<ManaCostShard, SpellAbility> sources) {
+        final Map<AbilityManaPart, String> choices = new IdentityHashMap<>();
+        if (sources != null) {
+            for (final SpellAbility ma : sources.values()) {
+                final AbilityManaPart part = ma.getManaPart();
+                if (part != null) {
+                    choices.putIfAbsent(part, part.getExpressChoice());
+                }
+            }
         }
+        return choices;
+    }
+
+    private static void restoreExpressChoices(final Map<AbilityManaPart, String> choices) {
+        choices.forEach(AbilityManaPart::setExpressChoice);
     }
 
     /**
