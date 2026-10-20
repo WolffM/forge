@@ -20,6 +20,15 @@ public abstract class CostDecisionMakerBase implements ICostVisitor<PaymentDecis
 
     public Player getPlayer() { return player; }
     public abstract boolean paysRightAfterDecision();
+
+    /**
+     * Whether this payer chooses what a cost sacrifices or discards before the ability's targets are
+     * chosen, the order MTG Arena asks them in. Only the choice moves: the objects are still paid in
+     * rule 601.2h, after the targets (601.2c), and are offered as targets as the rules allow.
+     */
+    public boolean choosesCostObjectsFirst() {
+        return false;
+    }
     public boolean isEffect() {
         return effect;
     }
