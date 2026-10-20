@@ -159,11 +159,20 @@ public class CostPayment extends ManaConversionMatrix {
         if (!decisionMaker.choosesCostObjectsFirst()) {
             return true;
         }
+        final Game game = decisionMaker.getPlayer().getGame();
         for (final CostPart part : CostAdjustment.adjust(cost, ability, decisionMaker.isEffect()).getCostParts()) {
             if (!isChosenBeforeTargets(part)) {
                 continue;
             }
-            final PaymentDecision pd = part.accept(decisionMaker);
+            // On the cost stack while it is decided, as payCost puts it: what reads the stack
+            // (a GUI naming the open choice a cost's sacrifice) sees the same part either way
+            final PaymentDecision pd;
+            try {
+                game.costPaymentStack.push(part, this);
+                pd = part.accept(decisionMaker);
+            } finally {
+                game.costPaymentStack.pop();
+            }
             if (pd == null) {
                 return false;
             }
