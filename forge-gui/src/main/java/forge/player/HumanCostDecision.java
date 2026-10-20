@@ -38,6 +38,11 @@ public class HumanCostDecision extends CostDecisionMakerBase {
     }
 
     @Override
+    public boolean choosesCostObjectsFirst() {
+        return true;
+    }
+
+    @Override
     public PaymentDecision visit(final CostAddMana cost) {
         return PaymentDecision.number(cost.getAbilityAmount(ability));
     }

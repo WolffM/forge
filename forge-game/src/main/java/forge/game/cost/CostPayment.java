@@ -34,6 +34,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * <p>
@@ -48,6 +49,7 @@ public class CostPayment extends ManaConversionMatrix {
     private Cost adjustedCost;
     private final SpellAbility ability;
     private final List<CostPart> paidCostParts = Lists.newArrayList();
+    private final List<Pair<CostPart, PaymentDecision>> chosenFirst = Lists.newArrayList();
 
     /**
      * <p>
@@ -133,6 +135,68 @@ public class CostPayment extends ManaConversionMatrix {
         new ManaRefundService(this.ability).refundManaPaid();
     }
 
+    /**
+     * A sacrifice or discard whose objects the payer picks from a list: the costs whose choice is asked
+     * before the targets by a payer that {@link CostDecisionMakerBase#choosesCostObjectsFirst() chooses
+     * them first}. A cost that names its object (this card, the whole hand, at random) has no choice to move.
+     */
+    public static boolean isChosenBeforeTargets(final CostPart part) {
+        if (!(part instanceof CostSacrifice || part instanceof CostDiscard) || part.payCostFromSource()) {
+            return false;
+        }
+        final String type = part.getType();
+        return !"All".equals(part.getAmount()) && !"Hand".equals(type) && !"Random".equals(type)
+                && !"LastDrawn".equals(type) && !"OriginalHost".equals(type);
+    }
+
+    /**
+     * Asks the payer which objects this payment's sacrifices and discards will take, before the
+     * ability's targets are chosen; nothing is paid here. {@link #payCost} pays them as chosen. False
+     * when the payer cancels a choice.
+     */
+    public boolean chooseObjectsBeforeTargets(final CostDecisionMakerBase decisionMaker) {
+        chosenFirst.clear();
+        if (!decisionMaker.choosesCostObjectsFirst()) {
+            return true;
+        }
+        for (final CostPart part : CostAdjustment.adjust(cost, ability, decisionMaker.isEffect()).getCostParts()) {
+            if (!isChosenBeforeTargets(part)) {
+                continue;
+            }
+            final PaymentDecision pd = part.accept(decisionMaker);
+            if (pd == null) {
+                return false;
+            }
+            chosenFirst.add(Pair.of(part, pd));
+        }
+        return true;
+    }
+
+    /**
+     * The decision chosen before the targets for {@code part} (the cost was adjusted again since, so
+     * parts are matched by kind, type and amount), or null when there is none or an object it chose has
+     * since left its zone — a mana ability can sacrifice it — so the payer is asked again.
+     */
+    private PaymentDecision takeChosenFirst(final CostPart part) {
+        for (int i = 0; i < chosenFirst.size(); i++) {
+            final CostPart chosen = chosenFirst.get(i).getLeft();
+            if (chosen.getClass() != part.getClass() || !Objects.equals(chosen.getType(), part.getType())
+                    || !Objects.equals(chosen.getAmount(), part.getAmount())) {
+                continue;
+            }
+            final PaymentDecision pd = chosenFirst.remove(i).getRight();
+            final Game game = ability.getHostCard().getGame();
+            for (final Card c : pd.cards) {
+                final Card now = game.getCardState(c, null);
+                if (now == null || !now.equalsWithGameTimestamp(c)) {
+                    return null;
+                }
+            }
+            return pd;
+        }
+        return null;
+    }
+
     public boolean payCost(final CostDecisionMakerBase decisionMaker) {
         adjustedCost = CostAdjustment.adjust(cost, ability, decisionMaker.isEffect());
         List<CostPart> costParts = adjustedCost.getCostPartsWithZeroMana();
@@ -149,7 +213,10 @@ public class CostPayment extends ManaConversionMatrix {
             try {
                 game.costPaymentStack.push(part, this);
 
-                PaymentDecision pd = part.accept(decisionMaker);
+                PaymentDecision pd = takeChosenFirst(part);
+                if (pd == null) {
+                    pd = part.accept(decisionMaker);
+                }
 
                 // Right before we start paying as decided, we need to transfer the CostPayments matrix over?
                 if (pd != null) {
