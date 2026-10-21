@@ -9,6 +9,7 @@ import forge.game.card.CardView;
 import forge.game.cost.Cost;
 import forge.game.cost.CostPart;
 import forge.game.cost.CostPartMana;
+import forge.game.cost.CostPayLife;
 import forge.game.cost.CostTap;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
@@ -322,7 +323,63 @@ public final class AvailableActions {
         if (ComputerUtilMana.canPayManaCost(sa, player, 0, false)) {
             return true;
         }
-        return canAffordWithManaRocks(sa, player) || canAffordWithLife(sa, player);
+        return canAffordWithManaRocks(sa, player) || canAffordWithLife(sa, player) || canAffordWithLifeMana(sa, player);
+    }
+
+    /**
+     * The AI payer reads mana sources on the battlefield and in hand only
+     * ({@code ComputerUtilMana.getAvailableManaSources}), and each at most once. A mana ability in
+     * the player's Command zone paid only with life (Channel's effect: "Pay 1 life: Add {C}") is
+     * neither, and the payment input uses it from the life total
+     * ({@code InputPayManaOfCostPayment.onPlayerSelected}) as many times as there is life to pay.
+     * Activate each in thought while the life lasts and the cost still takes its mana; then ask the
+     * payer about the rest.
+     */
+    private static boolean canAffordWithLifeMana(SpellAbility sa, Player player) {
+        final ManaCostBeingPaid cost = ComputerUtilMana.calculateManaCost(sa.getPayCosts(), sa, player, true, 0, false);
+        int life = 0;
+        boolean added = false;
+        for (Card card : player.getCardsIn(ZoneType.Command)) {
+            for (SpellAbility ma : card.getManaAbilities()) {
+                ma.setActivatingPlayer(player);
+                final AbilityManaPart part = ma.getManaPart();
+                final int each = lifeOnlyCost(ma);
+                if (part == null || each <= 0 || !ma.canPlay() || part.isComboMana() || part.isAnyMana() || part.isSpecialMana()) {
+                    continue;
+                }
+                final int amount = ma.amountOfManaGenerated(false);
+                while (!cost.isPaid() && player.canPayLife(life + each, false, ma)) {
+                    boolean paid = false;
+                    for (String colour : part.mana(ma).split(" ")) {
+                        for (int i = 0; i < amount; i++) {
+                            paid |= cost.ai_payMana(colour, player.getManaPool());
+                        }
+                    }
+                    if (!paid) {
+                        break;
+                    }
+                    life += each;
+                    added = true;
+                }
+            }
+        }
+        return added && (cost.isPaid() || ComputerUtilMana.canPayManaCost(cost, sa, player, false));
+    }
+
+    /** The life a mana ability's cost takes when life is all it takes, else 0. */
+    private static int lifeOnlyCost(SpellAbility ma) {
+        final Cost cost = ma.getPayCosts();
+        if (cost == null) {
+            return 0;
+        }
+        int life = 0;
+        for (CostPart part : cost.getCostParts()) {
+            if (!(part instanceof CostPayLife)) {
+                return 0;
+            }
+            life += part.getAbilityAmount(ma);
+        }
+        return life;
     }
 
     /**

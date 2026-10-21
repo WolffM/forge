@@ -161,7 +161,7 @@ public abstract class InputPayMana extends InputSyncronizedBase {
     }
 
     /** The colours (and generic) some part of the remaining cost can still be paid with, after the pool. */
-    private byte colorsPayable() {
+    protected byte colorsPayable() {
         byte colorCanUse = 0;
         for (final byte color : ManaAtom.MANATYPES) {
             if (manaCost.isAnyPartPayableWith(color, player.getManaPool())) {

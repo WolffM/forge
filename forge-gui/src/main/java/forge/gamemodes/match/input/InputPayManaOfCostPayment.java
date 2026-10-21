@@ -2,11 +2,16 @@ package forge.gamemodes.match.input;
 
 import forge.card.mana.ManaAtom;
 import forge.card.mana.ManaCostShard;
+import forge.game.card.Card;
+import forge.game.cost.Cost;
+import forge.game.cost.CostPart;
+import forge.game.cost.CostPayLife;
 import forge.game.mana.Mana;
 import forge.game.mana.ManaConversionMatrix;
 import forge.game.mana.ManaCostBeingPaid;
 import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
+import forge.game.zone.ZoneType;
 import forge.localinstance.properties.ForgePreferences;
 import forge.model.FModel;
 import forge.player.PlayerControllerHuman;
@@ -47,14 +52,77 @@ public class InputPayManaOfCostPayment extends InputPayMana {
                 if (manaCost.payPhyrexian()) {
                     saPaidFor.setSpendPhyrexianMana(true);
                     this.phyLifeToLose += 2;
+                    this.showMessage();
+                    return;
                 } else if (player.hasKeyword("PayLifeInsteadOf:B") && manaCost.hasAnyKind(ManaAtom.BLACK)) {
                     manaCost.decreaseShard(ManaCostShard.BLACK, 1);
                     this.phyLifeToLose += 2;
+                    this.showMessage();
+                    return;
                 }
             }
-
+            final SpellAbility lifeMana = lifeManaAbility();
+            if (lifeMana != null) {
+                payWithLifeMana(lifeMana);
+                return;
+            }
             this.showMessage();
         }
+    }
+
+    /**
+     * A mana ability paid only with life whose card has no place on the table to click: one in the
+     * player's Command zone, as Channel's effect is ("Pay 1 life: Add {C}"). The life total is
+     * where it is used, one activation per click, as a Phyrexian shard is paid. Null when there is
+     * none, or none makes mana the rest of the cost takes, or the life is not there to pay.
+     */
+    private SpellAbility lifeManaAbility() {
+        final byte colorCanUse = colorsPayable();
+        if (colorCanUse == 0) {
+            return null;
+        }
+        for (final Card card : player.getCardsIn(ZoneType.Command)) {
+            for (final SpellAbility ma : getAllManaAbilities(card)) {
+                final int life = lifeOnlyCost(ma.getPayCosts(), ma);
+                if (life > 0 && player.canPayLife(this.phyLifeToLose + life, this.effect, ma) && ma.isManaAbilityFor(saPaidFor, colorCanUse)) {
+                    return ma;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The life a cost made only of life payments takes, or 0 when any other part is in it. */
+    private static int lifeOnlyCost(final Cost cost, final SpellAbility sa) {
+        if (cost == null) {
+            return 0;
+        }
+        int life = 0;
+        for (final CostPart part : cost.getCostParts()) {
+            if (!(part instanceof CostPayLife)) {
+                return 0;
+            }
+            life += part.getAbilityAmount(sa);
+        }
+        return life;
+    }
+
+    /**
+     * Activate {@code ma} for this payment the way a click on its card does, with its life cost
+     * taken as chosen: the click on the life total was the choice, so Forge does not ask again
+     * whether to pay it.
+     */
+    private void payWithLifeMana(final SpellAbility ma) {
+        game.getAction().invoke(() -> {
+            final Cost cost = ma.getPayCosts();
+            final boolean wasMandatory = cost.isMandatory();
+            cost.setMandatory(true);
+            try {
+                activateManaAbility(ma.getHostCard(), ma);
+            } finally {
+                cost.setMandatory(wasMandatory);
+            }
+        });
     }
 
     @Override
@@ -104,6 +172,11 @@ public class InputPayManaOfCostPayment extends InputPayMana {
                 sb.append(localizer.getMessage("lblClickOnYourLifeTotalToPayLifeForPhyrexianOrBlackMana"));
             }
             msg.append("\n(").append(sb).append(")");
+        } else {
+            final SpellAbility lifeMana = lifeManaAbility();
+            if (lifeMana != null) {
+                msg.append("\n(").append(localizer.getMessage("lblClickOnYourLifeTotalToPayLifeForMana", lifeOnlyCost(lifeMana.getPayCosts(), lifeMana))).append(")");
+            }
         }
 
         return msg.toString();
