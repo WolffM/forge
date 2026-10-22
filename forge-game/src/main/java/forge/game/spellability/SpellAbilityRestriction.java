@@ -346,6 +346,28 @@ public class SpellAbilityRestriction extends SpellAbilityVariables {
         return activator.isValid(validPlayer, c.getController(), c, sa);
     }
 
+    /**
+     * Whether the condition that unlocks {@code sa}'s alternative cost holds for {@code activator}:
+     * surge, spectacle, prowl and freerunning are each castable only once something has happened
+     * this turn. Null when {@code sa} is not cast for an alternative cost, or for one with no such
+     * condition (evoke, dash, overload …).
+     */
+    public static Boolean alternativeCostMet(final SpellAbility sa, final Player activator) {
+        if (sa.isSurged()) {
+            return activator.hasSurge();
+        }
+        if (sa.isSpectacle()) {
+            return activator.getOpponentLostLifeThisTurn() > 0;
+        }
+        if (sa.isProwl()) {
+            return activator.hasProwl(sa);
+        }
+        if (sa.isFreerunning()) {
+            return activator.hasFreerunning();
+        }
+        return null;
+    }
+
     public final boolean checkOtherRestrictions(final Card c, final SpellAbility sa, final Player activator) {
         final Game game = activator.getGame();
 
@@ -385,15 +407,8 @@ public class SpellAbilityRestriction extends SpellAbilityVariables {
                 return false;
             }
         }
-        if (sa.isSurged()) {
-            if (!activator.hasSurge()) {
-                return false;
-            }
-        }
-        if (sa.isSpectacle()) {
-            if (activator.getOpponentLostLifeThisTurn() <= 0) {
-                return false;
-            }
+        if (Boolean.FALSE.equals(alternativeCostMet(sa, activator))) {
+            return false;
         }
         if (isBlessing()) {
             if (!activator.hasBlessing()) {
@@ -402,16 +417,6 @@ public class SpellAbilityRestriction extends SpellAbilityVariables {
         }
         if (isSolved()) {
             if (!c.isSolved()) {
-                return false;
-            }
-        }
-        if (sa.isProwl()) {
-            if (!activator.hasProwl(sa)) {
-                return false;
-            }
-        }
-        if (sa.isFreerunning()) {
-            if (!activator.hasFreerunning()) {
                 return false;
             }
         }
