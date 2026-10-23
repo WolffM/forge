@@ -12,7 +12,9 @@ public class LondonMulligan extends AbstractMulligan {
 
     @Override
     public boolean canMulligan() {
-        return !kept && tuckCardsDuringMulligan() <= player.getMaxHandSize();
+        // Another mulligan must leave a bottom the redrawn hand can pay: seven cards cover seven at most,
+        // so the eighth mulligan is never offered (it asked for eight of seven and could not be answered).
+        return !kept && tuckCardsAfter(timesMulliganed + 1) <= handSizeAfterNextMulligan();
     }
 
     @Override
@@ -42,11 +44,16 @@ public class LondonMulligan extends AbstractMulligan {
 
     @Override
     public int tuckCardsDuringMulligan() {
-        if (timesMulliganed == 0) {
+        return tuckCardsAfter(timesMulliganed);
+    }
+
+    /** The cards a kept hand puts on the bottom after {@code mulligans} mulligans: one each, the first free if it is. */
+    private int tuckCardsAfter(int mulligans) {
+        if (mulligans == 0) {
             return 0;
         }
 
         int extraCard = firstMulliganFree ? 1 : 0;
-        return timesMulliganed - extraCard;
+        return mulligans - extraCard;
     }
 }
