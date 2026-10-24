@@ -1570,14 +1570,14 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
      *  {@link #chooseSpellAbilityToPlay} and reused by {@link #pushActionableCards}. */
     private Set<CardView> cachedActionableCards;
 
-    /** The cards of the last priority-time scan that are a play besides their mana
-     *  ({@link AvailableActions.Scan#plays}); null when no full scan ran. Written on the game
-     *  thread before the set is pushed, read by a GUI that wants to tell a play from a mana
-     *  source without running the scan's AI controller swap off the game thread. */
-    private volatile Set<CardView> actionablePlays;
+    /** The last priority-time scan ({@link AvailableActions.Scan}: its plays besides their mana,
+     *  and the permanents among them that can animate themselves to fight); null when no full scan
+     *  ran. Written on the game thread before the set is pushed, read by a GUI that wants to tell a
+     *  play from a mana source without running the scan's AI controller swap off the game thread. */
+    private volatile AvailableActions.Scan actionableScan;
 
-    public Set<CardView> getActionablePlays() {
-        return actionablePlays;
+    public AvailableActions.Scan getActionableScan() {
+        return actionableScan;
     }
 
     /** Push the actionable-card set to the GUI. Payment mode offers the sources the open
@@ -1620,7 +1620,7 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
                 actionable.addAll(cachedActionableCards);
             } else {
                 final AvailableActions.Scan scan = AvailableActions.scan(getPlayer(), computeAvailableActionsBudgetMs(getPlayer()));
-                actionablePlays = scan.plays();
+                actionableScan = scan;
                 actionable.addAll(scan.actionable());
             }
         }
@@ -1703,18 +1703,18 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
                 // Highlights need the full set; APINA derives its boolean from the same scan.
                 final AvailableActions.Scan scan = AvailableActions.scan(getPlayer(), timeoutMs);
                 Set<CardView> actionable = scan.actionable();
-                actionablePlays = scan.plays();
+                actionableScan = scan;
                 cachedActionableCards = actionable;
                 getPlayer().getView().setHasAvailableActions(!actionable.isEmpty());
             } else {
                 // APINA only — early-exit boolean scan is cheaper than a full walk.
                 cachedActionableCards = null;
-                actionablePlays = null;
+                actionableScan = null;
                 getPlayer().getView().setHasAvailableActions(AvailableActions.compute(getPlayer(), timeoutMs));
             }
         } else {
             cachedActionableCards = null;
-            actionablePlays = null;
+            actionableScan = null;
         }
 
         // yieldJustEndedFlag is read from the EDT (didYieldJustEnd); synchronized writer/reader pair handles visibility.
@@ -2764,7 +2764,7 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         // sees the undone state (a land tapped for mana stays unoffered). Drop it so the
         // re-shown prompt rescans the board as the undo left it.
         cachedActionableCards = null;
-        actionablePlays = null;
+        actionableScan = null;
         final Input currentInput = inputQueue.getInput();
         if (currentInput instanceof InputPassPriority) {
             // ensure prompt updated if needed

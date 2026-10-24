@@ -2,6 +2,7 @@ package forge.ai;
 
 import forge.card.mana.ManaCost;
 import forge.game.GameEntity;
+import forge.game.ability.ApiType;
 import forge.game.card.Card;
 import forge.game.card.CardCopyService;
 import forge.game.card.CardLists;
@@ -12,6 +13,8 @@ import forge.game.cost.CostPartMana;
 import forge.game.cost.CostPayLife;
 import forge.game.cost.CostTap;
 import forge.game.mana.ManaCostBeingPaid;
+import forge.game.phase.PhaseHandler;
+import forge.game.phase.PhaseType;
 import forge.game.player.Player;
 import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
@@ -23,6 +26,7 @@ import forge.game.zone.ZoneType;
 import org.tinylog.Logger;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -73,8 +77,13 @@ public final class AvailableActions {
      * Signet, a Celestial Colonnade whose animation its controller cannot pay for. Both sets are
      * read off the same {@link #canTake} test, on the game thread, so a reader elsewhere never
      * has to run the AI controller swap itself.
+     *
+     * {@code animates} is the subset of {@code plays} that are a play because they can make
+     * themselves a creature that could still fight this turn ({@link #animatesSelf},
+     * {@link #couldFight}): a Mutavault before its controller's attack, an Inkmoth Nexus before
+     * the other player's blocks.
      */
-    public record Scan(Set<CardView> actionable, Set<CardView> plays) {}
+    public record Scan(Set<CardView> actionable, Set<CardView> plays, Set<CardView> animates) {}
 
     /** Set form: walks every card so highlight consumers can mark the actionable subset. */
     public static Set<CardView> collectActionable(Player player, long timeoutMs) {
@@ -89,7 +98,7 @@ public final class AvailableActions {
             Logger.error(e, "AvailableActions.scan failed; marking every card actionable and a play");
             Set<CardView> all = new HashSet<>();
             addUnvisited(all, new HashSet<>(), player);
-            return new Scan(all, all);
+            return new Scan(all, all, new HashSet<>());
         }
     }
 
@@ -124,6 +133,7 @@ public final class AvailableActions {
         long deadlineNanos = System.nanoTime() + timeoutMs * 1_000_000L;
         Set<CardView> actionable = new HashSet<>();
         Set<CardView> plays = new HashSet<>();
+        Set<CardView> animates = new HashSet<>();
         Set<CardView> visited = new HashSet<>();
 
         for (ZoneScan scan : SCANS) {
@@ -137,30 +147,78 @@ public final class AvailableActions {
                     addUnvisited(unvisited, visited, player);
                     actionable.addAll(unvisited);
                     plays.addAll(unvisited);
-                    return new Scan(actionable, plays);
+                    return new Scan(actionable, plays, animates);
                 }
                 CardView cv = card.getView();
                 visited.add(cv);
                 if (cardHasActionable(card, player)) {
                     actionable.add(cv);
-                    if (earlyExit) return new Scan(actionable, plays);
-                    if (cardHasPlay(card, player)) {
-                        plays.add(cv);
-                    }
+                    if (earlyExit) return new Scan(actionable, plays, animates);
+                    addPlays(card, player, plays, animates);
                 }
             }
         }
-        return new Scan(actionable, plays);
+        return new Scan(actionable, plays, animates);
     }
 
-    /** Something the player would take on this card that is not a mana ability. */
-    private static boolean cardHasPlay(Card card, Player player) {
+    /**
+     * Whether the card is a play: something the player would take on it that is not a mana ability.
+     * An ability that only makes its own permanent a creature is a play only while that creature
+     * could still fight ({@link #couldFight}); one that does more besides (Creeping Tar Pit's
+     * unblockability, a Vehicle's counters) is a play for the rest wherever it can be taken.
+     */
+    private static void addPlays(Card card, Player player, Set<CardView> plays, Set<CardView> animates) {
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
-            if (!sa.isManaAbility() && canTake(sa, player)) {
-                return true;
+            if (sa.isManaAbility() || !canTake(sa, player)) {
+                continue;
             }
+            if (animatesSelf(sa)) {
+                if (couldFight(sa, player)) {
+                    animates.add(card.getView());
+                } else if (sa.getSubAbility() == null) {
+                    continue;
+                }
+            }
+            plays.add(card.getView());
         }
-        return false;
+    }
+
+    /**
+     * An ability that makes its own permanent a creature ({@code ApiType.Animate} with no target,
+     * {@code Defined$ Self} or none, {@code Types$} naming Creature): a man-land, a Vehicle's Crew,
+     * a Gideon's 0.
+     */
+    private static boolean animatesSelf(SpellAbility sa) {
+        return sa.getApi() == ApiType.Animate && !sa.usesTargeting()
+                && (!sa.hasParam("Defined") || "Self".equals(sa.getParam("Defined")))
+                && sa.hasParam("Types") && Arrays.asList(sa.getParam("Types").split(",")).contains("Creature");
+    }
+
+    /**
+     * Whether the permanent {@code sa} animates could still attack (its controller's turn, before
+     * attackers are declared, not summoning sick) or block (the other turn, before blockers are
+     * declared) once the ability is paid for. Not when it is tapped, already a creature, or tapped
+     * by the cost itself. Its own mana never pays for it: the payer {@link #canAfford} asks leaves
+     * out every mana ability of the card being paid for ({@code ComputerUtilMana.chooseManaAbility},
+     * as Forge's Auto pays), and so does {@link #canAffordWithManaRocks}.
+     *
+     * A tapped permanent animated for something besides combat (an Ashnod's Altar) is a use this
+     * gives up.
+     */
+    private static boolean couldFight(SpellAbility sa, Player player) {
+        final Card host = sa.getHostCard();
+        if (host.isTapped() || host.isCreature() || (sa.getPayCosts() != null && sa.getPayCosts().hasTapCost())) {
+            return false;
+        }
+        final PhaseHandler ph = player.getGame().getPhaseHandler();
+        final PhaseType phase = ph.getPhase();
+        if (phase == null) {
+            return true;
+        }
+        if (ph.isPlayerTurn(player)) {
+            return !host.hasSickness() && phase.isBefore(PhaseType.COMBAT_DECLARE_ATTACKERS);
+        }
+        return phase.isBefore(PhaseType.COMBAT_DECLARE_BLOCKERS);
     }
 
     // Land plays come through with no cost, no targets; spells and activated abilities (incl.
