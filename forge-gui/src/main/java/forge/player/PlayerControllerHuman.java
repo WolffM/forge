@@ -1682,6 +1682,7 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
                         }
                     }
                 }
+                actionable.addAll(untappable());
             } else if (cachedActionableCards != null) {
                 // Reuse the priority-time scan; recompute if neither APINA nor highlights triggered it.
                 actionable.addAll(cachedActionableCards);
@@ -1703,6 +1704,28 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
             }
         }
         return weighted;
+    }
+
+    /** The permanents a click would untap now ({@link #tryUndo}): tapped for mana, the mana unspent. */
+    private Set<CardView> untappable() {
+        final Set<CardView> result = Sets.newHashSet();
+        if (!canUndoLastAction()) {
+            return result;
+        }
+        for (final Card c : player.getCardsIn(ZoneType.Battlefield).threadSafeIterable()) {
+            if (AvailableActions.untaps(c, player)) {
+                result.add(c.getView());
+            }
+        }
+        return result;
+    }
+
+    /** The permanents a click would untap, for an input that offers nothing of its own. */
+    public List<CardView> getUntappable() {
+        if (!yieldController.getBoolPref(FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS)) {
+            return List.of();
+        }
+        return Lists.newArrayList(untappable());
     }
 
     /** Undeclared, legal attacker candidates. */
@@ -2898,9 +2921,9 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         // re-shown prompt rescans the board as the undo left it.
         cachedActionableCards = null;
         actionableScan = null;
+        // Re-show the open input, which offers the board as the undo left it.
         final Input currentInput = inputQueue.getInput();
-        if (currentInput instanceof InputPassPriority) {
-            // ensure prompt updated if needed
+        if (currentInput != null) {
             currentInput.showMessageInitial();
         }
         if (getGui().isNetGame()) {

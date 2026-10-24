@@ -87,6 +87,15 @@ public abstract class InputBase implements java.io.Serializable, Input {
         }
     }
 
+    /**
+     * Whether this input publishes the cards a click would act on itself ({@code
+     * PlayerControllerHuman.getActionableCards}, which counts the permanents a click would untap).
+     * Every other input offers just those ({@link #selectCard}).
+     */
+    protected boolean offersCards() {
+        return false;
+    }
+
     protected abstract void showMessage();
 
     /** Whether an action this input started is still running. That action shows the input again when it ends. */
@@ -99,9 +108,12 @@ public abstract class InputBase implements java.io.Serializable, Input {
         return Selection.NONE;
     }
 
-    /** The cards this prompt highlights as worth acting on. */
+    /**
+     * The cards this prompt highlights as worth acting on. An input that does not offer cards of its
+     * own ({@link #offersCards}) offers the permanents a click would untap ({@link #selectCard}).
+     */
     protected List<CardView> getActionable() {
-        return List.of();
+        return offersCards() ? List.of() : controller.getUntappable();
     }
 
     /** Sends this prompt's marks, with the targets kept marked while a spell's cost is paid. */
@@ -132,10 +144,25 @@ public abstract class InputBase implements java.io.Serializable, Input {
         onOk();
     }
 
+    /**
+     * A permanent this player tapped for mana untaps on a click in every input, as strictly as Forge
+     * undoes it ({@code PlayerControllerHuman.tryUndo}: its mana unspent, nothing triggered) — while a
+     * spell's targets are chosen, its cost paid, a confirm open. Unless the input takes that card
+     * itself (a tapped land as a target or a sacrifice); at priority the untap comes first, since the
+     * click's other use there is the permanent's own ability ({@link #untapsFirst}).
+     */
     @Override
     public final boolean selectCard(final Card c, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
         if (isFinished()) { return false; }
+        if ((untapsFirst() || getActivateAction(c) == null) && controller.tryUndo(c)) {
+            return true;
+        }
         return onCardSelected(c, otherCardsToSelect, triggerEvent);
+    }
+
+    /** Whether a click untaps before this input's own use of the card ({@link #selectCard}). */
+    protected boolean untapsFirst() {
+        return false;
     }
 
     protected boolean onCardSelected(final Card c, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {

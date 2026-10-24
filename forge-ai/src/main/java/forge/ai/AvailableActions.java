@@ -229,10 +229,9 @@ public final class AvailableActions {
     // paid, Mana Confluence's life, Lion's Eye Diamond's sacrifice and discard.
     //
     // A permanent tapped for mana whose mana still floats is offered too: a click on it untaps it
-    // (InputPassPriority.onCardSelected -> PlayerControllerHuman.tryUndo), in any order.
+    // (InputBase.selectCard -> PlayerControllerHuman.tryUndo), in any order.
     private static boolean cardHasActionable(Card card, Player player) {
-        if (card.isTapped() && player.getGame().getStack().canUndo(player)
-                && player.getGame().getStack().undoableBy(card) != null) {
+        if (untaps(card, player)) {
             return true;
         }
         for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
@@ -241,6 +240,12 @@ public final class AvailableActions {
             }
         }
         return false;
+    }
+
+    /** A permanent the player tapped for mana whose activation Forge would undo on a click now. */
+    public static boolean untaps(Card card, Player player) {
+        return card.isTapped() && player.getGame().getStack().canUndo(player)
+                && player.getGame().getStack().undoableBy(card) != null;
     }
 
     private static boolean canTake(SpellAbility sa, Player player) {
