@@ -330,11 +330,17 @@ public class InputPassPriority extends InputSyncronizedBase {
     public List<SpellAbility> getChosenSa() { return chosenSa; }
 
     @Override
+    protected boolean untapsFirst() {
+        return true;
+    }
+
+    @Override
+    protected boolean offersCards() {
+        return true;
+    }
+
+    @Override
     protected boolean onCardSelected(final Card card, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
-        // A permanent tapped for mana that is still unspent untaps on a click, in any order.
-        if (getController().tryUndo(card)) {
-            return true;
-        }
         // remove unplayable unless triggerEvent specified, in which case unplayable may be shown as disabled options
         // (so shortcuts are constant regardless of game state)
         List<SpellAbility> abilities = card.getAllPossibleAbilities(getController().getPlayer(), triggerEvent == null); 

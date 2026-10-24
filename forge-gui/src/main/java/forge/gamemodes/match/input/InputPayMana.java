@@ -79,6 +79,11 @@ public abstract class InputPayMana extends InputSyncronizedBase {
     }
 
     @Override
+    protected boolean offersCards() {
+        return true;
+    }
+
+    @Override
     protected boolean onCardSelected(final Card card, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
         if (getController().getGui().isLibgdxPort()) {
             // Mobile Forge allows to tap cards underneath the current card even if the current one is tapped
