@@ -1,5 +1,6 @@
 package forge.game.card;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.LinkedHashSet;
@@ -17,20 +18,20 @@ public record CounterKeywordType(KeywordView keyword) implements CounterType {
     static ImmutableList<String> keywordCounter = ImmutableList.of(
             "Flying", "First Strike", "Double Strike", "Deathtouch", "Decayed", "Exalted", "Haste", "Hexproof",
             "Indestructible", "Lifelink", "Menace", "Reach", "Shadow", "Trample", "Vigilance");
-    private static Map<String, CounterKeywordType> sMap = Maps.newHashMap();
+    // every game in the process fills this, so it is locked
+    private static final Map<String, CounterKeywordType> sMap = Collections.synchronizedMap(Maps.newHashMap());
 
     public static CounterKeywordType get(String s) {
-        if (!sMap.containsKey(s)) {
-            sMap.put(s, new CounterKeywordType(Keyword.getInstance(s).getView()));
-        }
-        return sMap.get(s);
+        return sMap.computeIfAbsent(s, k -> new CounterKeywordType(Keyword.getInstance(k).getView()));
     }
 
     public static Set<CounterType> getValues() {
         // add fixed first
         Set<CounterType> result = keywordCounter.stream().map(CounterKeywordType::get).collect(Collectors.toCollection(LinkedHashSet::new));
         // add variable ones later
-        result.addAll(sMap.values());
+        synchronized (sMap) {
+            result.addAll(sMap.values());
+        }
         return result;
     }
     

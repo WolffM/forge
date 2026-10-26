@@ -1,5 +1,6 @@
 package forge.game.card;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.LinkedHashSet;
@@ -7,17 +8,17 @@ import java.util.LinkedHashSet;
 import com.google.common.collect.Maps;
 
 public record CounterCustomType(String keyword) implements CounterType {
-    private static Map<String, CounterCustomType> sMap = Maps.newHashMap();
+    // every game in the process fills this, so it is locked
+    private static final Map<String, CounterCustomType> sMap = Collections.synchronizedMap(Maps.newHashMap());
 
     public static CounterCustomType get(String s) {
-        if (!sMap.containsKey(s)) {
-            sMap.put(s, new CounterCustomType(s));
-        }
-        return sMap.get(s);
+        return sMap.computeIfAbsent(s, CounterCustomType::new);
     }
 
     public static Set<CounterType> getValues() {
-        return new LinkedHashSet<CounterType>(sMap.values());
+        synchronized (sMap) {
+            return new LinkedHashSet<CounterType>(sMap.values());
+        }
     }
     
     @Override

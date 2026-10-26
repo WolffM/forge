@@ -7,6 +7,7 @@ import forge.ai.SpellApiToAi;
 import forge.game.Game;
 import forge.game.ability.ApiType;
 import forge.game.card.Card;
+import forge.game.card.CardCollection;
 import forge.game.phase.PhaseType;
 import forge.game.player.Player;
 import forge.game.spellability.SpellAbility;
@@ -93,4 +94,18 @@ public class ChangeZoneAiTest extends AITest {
         }
     }
 
+    @Test
+    public void testIntuitionPlanIsTheDecidingAisOwn() {
+        // the plan used to be one static list for the process: another game's AI read and cleared it
+        Game one = initAndCreateGame();
+        Game two = initAndCreateGame();
+        Player aiOne = one.getPlayers().get(1);
+        Player aiTwo = two.getPlayers().get(1);
+        CardCollection planOne = ((PlayerControllerAi) aiOne.getController()).getAi().getPlannedChoices();
+        CardCollection planTwo = ((PlayerControllerAi) aiTwo.getController()).getAi().getPlannedChoices();
+
+        planOne.add(addCard("Grizzly Bears", aiOne));
+        AssertJUnit.assertNotSame(planOne, planTwo);
+        AssertJUnit.assertTrue("another game's AI plans nothing of this one's", planTwo.isEmpty());
+    }
 }
