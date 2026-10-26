@@ -906,7 +906,8 @@ public class AiAttackController {
 
                 for (final Card attacker : this.attackers) {
                     final GameEntity finalDefender = defender;
-                    tasks.add(withDeadline(deadline, () -> {
+                    // bound to this game's random at submission: the pool's threads work for no game
+                    tasks.add(MyRandom.propagate(withDeadline(deadline, () -> {
                         GameEntity mustAttackDef = null;
                         if (attacker.getSVar("MustAttack").equals("True")) {
                             mustAttackDef = finalDefender;
@@ -967,7 +968,7 @@ public class AiAttackController {
                             }
                         }
                         return 0;
-                    }));
+                    })));
                 }
 
                 try {

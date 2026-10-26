@@ -40,10 +40,30 @@ public class Match {
 
     private GameOutcome lastOutcome = null;
 
+    /**
+     * Every game of this match draws from this (see {@link MyRandom}). A match made by a thread
+     * bound to a random shares it: a simulation's or snapshot's copy draws from the real game's
+     * stream as it always did, and a host can seed a match by binding before creating it.
+     * Otherwise its seed comes from the JVM-wide random, so a JVM seeded with
+     * {@link MyRandom#setRandom} still plays its matches the same way.
+     */
+    private Random random;
+
     public Match(final GameRules rules0, final List<RegisteredPlayer> players0, final String title) {
         players = Collections.unmodifiableList(Lists.newArrayList(players0));
         rules = rules0;
         this.title = title;
+        final Random bound = MyRandom.getBound();
+        random = bound != null ? bound : new Random(MyRandom.getRandom().nextLong());
+    }
+
+    public Random getRandom() {
+        return random;
+    }
+
+    /** Seeds this match: call it before its first game starts. */
+    public void setRandom(final Random random0) {
+        random = Objects.requireNonNull(random0);
     }
 
     public GameRules getRules() {
@@ -70,7 +90,10 @@ public class Match {
     }
 
     public Game createGame() {
-        return new Game(players, rules, this);
+        // what a game draws while it is built (an AI's profile, say) is drawn from its own stream
+        try (MyRandom.Scope ignored = MyRandom.bind(random)) {
+            return new Game(players, rules, this);
+        }
     }
 
     public void startGame(final Game game) {
@@ -78,6 +101,12 @@ public class Match {
     }
 
     public void startGame(final Game game, Runnable startGameHook) {
+        try (MyRandom.Scope ignored = MyRandom.bind(game.getRandom())) {
+            playGame(game, startGameHook);
+        }
+    }
+
+    private void playGame(final Game game, Runnable startGameHook) {
         prepareAllZones(game);
         if (rules.useAnte()) {  // Deciding which cards go to ante
             Multimap<Player, Card> list = game.chooseCardsForAnte(rules.getMatchAnteRarity(), rules.getAnteIncludeBasicLands());
