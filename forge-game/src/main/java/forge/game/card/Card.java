@@ -7450,13 +7450,18 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
         return CardFactory.getCard(pc, owner, owner == null ? null : owner.getGame());
     }
 
-    private static final Map<PaperCard, Card> cp2card = Maps.newHashMap();
+    // every game in the process reads and fills this, so it is locked
+    private static final Map<PaperCard, Card> cp2card = Collections.synchronizedMap(Maps.newHashMap());
     public static Card getCardForUi(IPaperCard pc) {
         if (pc instanceof PaperCard) {
             Card res = cp2card.get(pc);
             if (res == null) {
+                // built outside the lock: two threads may both build one, and the first one put wins
                 res = fromPaperCard(pc, null);
-                cp2card.put((PaperCard) pc, res);
+                final Card prev = cp2card.putIfAbsent((PaperCard) pc, res);
+                if (prev != null) {
+                    res = prev;
+                }
             }
             return res;
         }

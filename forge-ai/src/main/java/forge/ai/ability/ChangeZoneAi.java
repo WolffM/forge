@@ -47,9 +47,12 @@ public class ChangeZoneAi extends SpellAbilityAi {
      * too much: blink/bounce/exile/tutor/Raise Dead/Surgical Extraction/......
      */
 
-    // multipleCardsToChoose is used by Intuition and can be adapted to be used by other
-    // cards where multiple cards are fetched at once and they need to be coordinated
-    private static CardCollection multipleCardsToChoose = new CardCollection();
+    // The planned choices are used by Intuition and can be adapted to be used by other
+    // cards where multiple cards are fetched at once and they need to be coordinated.
+    // They are the deciding AI's own: two games in one process never share them.
+    private static CardCollection plannedChoices(final Player ai) {
+        return ai.getController() instanceof PlayerControllerAi pc ? pc.getAi().getPlannedChoices() : new CardCollection();
+    }
 
     protected boolean willPayCosts(Player payer, SpellAbility sa, Cost cost, Card source) {
         if (sa.isHidden()) {
@@ -139,7 +142,8 @@ public class ChangeZoneAi extends SpellAbilityAi {
 
     @Override
     protected AiAbilityDecision checkApiLogic(Player aiPlayer, SpellAbility sa) {
-        multipleCardsToChoose.clear();
+        final CardCollection planned = plannedChoices(aiPlayer);
+        planned.clear();
         String aiLogic = sa.getParam("AILogic");
         if (aiLogic != null) {
             if (aiLogic.equals("Always")) {
@@ -159,7 +163,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
             } else if (aiLogic.equals("Intuition")) {
                 // This logic only fills the multiple cards array, the decision to play is made
                 // separately in hiddenOriginCanPlayAI later.
-                multipleCardsToChoose = SpecialCardAi.Intuition.considerMultiple(aiPlayer, sa);
+                planned.addAll(SpecialCardAi.Intuition.considerMultiple(aiPlayer, sa));
             } else if (aiLogic.equals("MazesEnd")) {
                 return SpecialCardAi.MazesEnd.consider(aiPlayer, sa);
             } else if (aiLogic.equals("Pongify")) {
@@ -1547,9 +1551,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
             } else if ("MazesEnd".equals(logic)) {
                 return SpecialCardAi.MazesEnd.considerCardToGet(decider, sa);
             } else if ("Intuition".equals(logic)) {
-                if (!multipleCardsToChoose.isEmpty()) {
-                    Card choice = multipleCardsToChoose.get(0);
-                    multipleCardsToChoose.remove(0);
+                final CardCollection planned = plannedChoices(decider);
+                if (!planned.isEmpty()) {
+                    Card choice = planned.get(0);
+                    planned.remove(0);
                     return choice;
                 }
             } else if (logic.startsWith("ExilePreference")) {

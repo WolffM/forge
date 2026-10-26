@@ -292,7 +292,8 @@ public enum Keyword {
         return getKeywordDetails(k).getKey();
     }
 
-    private static final Map<String, Set<Keyword>> cardKeywordSetLookup = new HashMap<>();
+    // every game in the process reads and fills this, so it is locked
+    private static final Map<String, Set<Keyword>> cardKeywordSetLookup = Collections.synchronizedMap(new HashMap<>());
 
     public static Set<Keyword> getKeywordSet(PaperCard card) {
         String name = card.getName();

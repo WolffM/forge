@@ -89,6 +89,8 @@ public class AiController {
     private final Player player;
     private final Game game;
     private final AiCardMemory memory;
+    // cards a "choose several" plan (Intuition) settled on when it decided to play, taken in order as the effect asks
+    private final CardCollection plannedChoices = new CardCollection();
     private Combat predictedCombat;
     private Combat predictedCombatNextTurn;
     private AIOption simMode;
@@ -132,6 +134,10 @@ public class AiController {
 
     public AiCardMemory getCardMemory() {
         return memory;
+    }
+
+    public CardCollection getPlannedChoices() {
+        return plannedChoices;
     }
 
     public Combat getPredictedCombat() {
