@@ -2733,6 +2733,7 @@ public class AiController {
                 final boolean isLifeInDanger = massReanimation && ComputerUtil.aiLifeInDanger(player, true, 0);
                 for (final SpellAbility sa : ComputerUtilAbility.getOriginalAndAltCostAbilities(all, player)) {
                     AITimeoutTracker.check();
+                    game.throwIfOver();
 
                     // Don't add Counterspells to the "normal" playcard lookups
                     if (skipCounter && sa.getApi() == ApiType.Counter) {
@@ -2837,6 +2838,9 @@ public class AiController {
             // wait only for what is left of the shared deadline (not a fresh full timeout per call)
             return future.get(Math.max(0, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            if (e.getCause() instanceof GameEndedException ended) {
+                throw ended; // the game ended mid-scan: this thread unwinds too
+            }
             e.printStackTrace();
             if (e instanceof TimeoutException) {
                 // log where the eval thread currently is - each timeout doubles as a

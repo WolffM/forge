@@ -1115,6 +1115,9 @@ public class AiBlockController {
      * @param possibleBlockers list of blockers to be considered
      */
     private void assignBlockers(final Combat combat, List<Card> possibleBlockers) {
+        // every block, real or predicted, passes here: an attack search that predicts blocks
+        // over and over (notNeededAsBlockers) stops at the next one once the game is over
+        ai.getGame().throwIfOver();
         if (attackers.isEmpty()) {
             return;
         }

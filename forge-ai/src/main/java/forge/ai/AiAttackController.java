@@ -814,6 +814,7 @@ public class AiAttackController {
         final long timeoutNanos = TimeUnit.SECONDS.toNanos(ai.getGame().getAITimeout());
         // predicting a HUMAN player's attack must not light up that player's timer bar
         final boolean trackTimer = ai.getController().isAI();
+        ai.getGame().throwIfOver(); // a game ended from another thread unwinds its search
         if (trackTimer) {
             AITimeoutTracker.begin(id, timeoutNanos);
         }
@@ -1109,6 +1110,7 @@ public class AiAttackController {
             int candidateUnblockedDamage = 0;
             for (final Card pCard : myList) {
                 AITimeoutTracker.check();
+                ai.getGame().throwIfOver();
                 // if the creature can attack then it's a potential attacker this
                 // turn, assume summoning sickness creatures will be able to
                 // TODO: Account for triggered power boosts.
@@ -1131,6 +1133,7 @@ public class AiAttackController {
 
             for (final Card pCard : categorizedOppList) {
                 AITimeoutTracker.check();
+                ai.getGame().throwIfOver();
                 // if the creature can attack next turn add it to counter attackers list
                 if (pCard.getNetCombatDamage() > 0 && ComputerUtilCombat.canAttackNextTurn(pCard)) {
                     nextTurnAttackers.add(pCard);
@@ -1221,6 +1224,7 @@ public class AiAttackController {
             boolean doUnblockableAttack = false;
             for (final Card attacker : this.attackers) {
                 AITimeoutTracker.check();
+                ai.getGame().throwIfOver();
                 boolean isUnblockableCreature = true;
                 // check blockers individually, as the bulk canBeBlocked doesn't
                 // check all circumstances
@@ -1236,6 +1240,7 @@ public class AiAttackController {
             }
             for (final Card attacker : nextTurnAttackers) {
                 AITimeoutTracker.check();
+                ai.getGame().throwIfOver();
                 boolean isUnblockableCreature = true;
                 // check blockers individually, as the bulk canBeBlocked doesn't
                 // check all circumstances
@@ -1320,9 +1325,11 @@ public class AiAttackController {
 
             while (!left.isEmpty()) {
                 AITimeoutTracker.check();
+                ai.getGame().throwIfOver();
                 CardCollection attackersAssigned = new CardCollection();
                 for (int i = 0; i < left.size(); i++) {
                     AITimeoutTracker.check();
+                    ai.getGame().throwIfOver();
                     final Card attacker = left.get(i);
                     if (aiAggression < 5 && !attacker.hasFirstStrike() && !attacker.hasDoubleStrike()
                             && ComputerUtilCombat.getTotalFirstStrikeBlockPower(attacker, defendingOpponent)
