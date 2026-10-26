@@ -2920,7 +2920,8 @@ public class ComputerUtil {
     }
 
     public static int evaluateBoardPosition(final Player ai, final Player opponent) {
-        return AiCache.getCached(ai.getGame(), "evaluateBoardPosition",
+        // ai may be null (AiPlayerPredicates.compareByBoardPosition): the opponent names the game
+        return AiCache.getCached(opponent.getGame(), "evaluateBoardPosition",
                 () -> evaluateBoardPositionChanged(ai, opponent),
                 List.of(AiCache::identity, AiCache::identity), ai, opponent);
     }
