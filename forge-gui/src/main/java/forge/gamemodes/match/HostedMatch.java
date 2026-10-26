@@ -180,7 +180,7 @@ public class HostedMatch {
         // (It still subscribes to the Match bus for UiEvent sounds like blocker assignment.)
 
         // This logs game actions to NetworkLogConfig for debugging network games
-        if (FServerManager.getInstance().isHosting()) {
+        if (FServerManager.isAnyHosting()) {
             game.subscribeToEvents(new NetworkGameEventListener());
         }
 

@@ -1,6 +1,5 @@
 package forge.game.mulligan;
 
-import forge.StaticData;
 import forge.game.GameLogEntryType;
 import forge.game.event.GameEventAddLog;
 import forge.game.card.Card;
@@ -44,7 +43,7 @@ public abstract class AbstractMulligan {
         }
         player.shuffle(null);
         timesMulliganed++;
-        if (StaticData.instance().getFilteredHandsEnabled()) {
+        if (player.getGame().getRules().hasFilteredHands()) {
             HandSmoothing.weighted(player, handSizeAfterNextMulligan());
         }
         mulliganDraw();

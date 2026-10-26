@@ -29,7 +29,7 @@ import forge.game.zone.ZoneType;
 import forge.util.MyRandom;
 
 /**
- * Filtered hands ({@code StaticData.getFilteredHandsEnabled}): before a hand is
+ * Filtered hands ({@code GameRules.hasFilteredHands}, defaulting to {@code StaticData.getFilteredHandsEnabled}): before a hand is
  * drawn, a second candidate is shuffled up and one of the two is kept, judged by
  * how far its land count is from the library's own land ratio. Only the order
  * of the library changes; the caller still draws the hand itself.

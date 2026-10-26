@@ -73,7 +73,7 @@ public class InputPassPriority extends InputSyncronizedBase {
 
     @Override
     public void showAndWait() {
-        final FServerManager server = FServerManager.getInstance();
+        final FServerManager server = FServerManager.hosting(getController().getGame());
         final AfkTimeout timeout = server != null
                 ? server.armAfkTimeout(getController(), this)
                 : AfkTimeout.NOOP;

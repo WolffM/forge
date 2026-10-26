@@ -2316,7 +2316,7 @@ public class GameAction {
             game.setAge(GameStage.Mulligan);
             for (final Player p1 : game.getPlayers()) {
                 // Choose starting hand for each player with multiple hands
-                if (StaticData.instance().getFilteredHandsEnabled() ) {
+                if (game.getRules().hasFilteredHands()) {
                     HandSmoothing.strict(p1, p1.getStartingHandSize());
                 }
                 p1.drawCards(p1.getStartingHandSize());

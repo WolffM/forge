@@ -3,6 +3,8 @@ package forge.game;
 import java.util.EnumSet;
 import java.util.Set;
 
+import forge.StaticData;
+
 public class GameRules {
     private final GameType gameType;
     private boolean manaBurn;
@@ -25,8 +27,21 @@ public class GameRules {
     // whether to warn about cards AI can't play well
     private boolean warnAboutAICards = true;
 
+    // filtered hands (HandSmoothing): a rule of this game, so games in one process may differ
+    private boolean filteredHands;
+
     public GameRules(final GameType type) {
         this.gameType = type;
+        final StaticData data = StaticData.instance();
+        this.filteredHands = data != null && data.getFilteredHandsEnabled();
+    }
+
+    /** Whether opening hands and mulligans are smoothed ({@code HandSmoothing}). Defaults to the preference. */
+    public boolean hasFilteredHands() {
+        return filteredHands;
+    }
+    public void setFilteredHands(final boolean filteredHands) {
+        this.filteredHands = filteredHands;
     }
 
     public GameType getGameType() {
