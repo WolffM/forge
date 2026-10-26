@@ -2237,7 +2237,7 @@ public class ComputerUtilCombat {
     // cached per AI decision (AiCache is cleared in chooseSpellAbilityToPlay);
     // predictions ask this once per attacker otherwise
     private static Boolean isCombatDamagePreventedThisTurnCached(final Game game) {
-        return AiCache.getCached("isPreventCombatDamageThisTurn",
+        return AiCache.getCached(game, "isPreventCombatDamageThisTurn",
                 () -> game.getReplacementHandler().isPreventCombatDamageThisTurn(),
                 List.of(AiCache::identity), game);
     }
