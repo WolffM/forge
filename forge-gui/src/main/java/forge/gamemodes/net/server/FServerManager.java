@@ -79,7 +79,13 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
     private static final int OUTBOUND_BUFFER_HIGH_WATER = 1024 * 1024;
     private static final int RECONNECT_TIMEOUT_SECONDS = 300;
 
+    /** The default server: the one the desktop and mobile online screens host. */
     private static FServerManager instance = null;
+    /**
+     * Every server hosting right now, the default one and any {@link #FServerManager() created}
+     * besides it. A JVM hosting several matches runs one server per match.
+     */
+    private static final Set<FServerManager> HOSTING = ConcurrentHashMap.newKeySet();
     private final Map<Channel, RemoteClient> clients = new ConcurrentHashMap<>();
     private final Map<String, RemoteClient> disconnectedClients = new ConcurrentHashMap<>();
     private final Map<String, Timer> reconnectTimers = new ConcurrentHashMap<>();
@@ -151,6 +157,7 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
         }, deadline, TimeUnit.SECONDS);
     }
 
+    private volatile boolean isHosting = false;
     // Created by startServer: an offline game reaches getInstance() but never needs the selectors
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -161,7 +168,7 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
     private int port;
     private static final Localizer localizer = Localizer.getInstance();
     private final Thread shutdownHook = new Thread(() -> {
-        if (HostingServer.isHosting()) {
+        if (isHosting) {
             stopServer(false);
         }
     });
@@ -170,7 +177,11 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
     private final forge.gamemodes.net.NetworkByteTracker byteTracker =
             FModel.getNetPreferences().getPrefBoolean(forge.localinstance.properties.ForgeNetPreferences.FNetPref.NET_BANDWIDTH_LOGGING) ? new forge.gamemodes.net.NetworkByteTracker() : null;
 
-    private FServerManager() {
+    /**
+     * A server of its own, apart from {@link #getInstance()}. Each one has its own port, lobby,
+     * clients and Netty event loops, so a process can host one match per server.
+     */
+    public FServerManager() {
     }
 
 
@@ -207,15 +218,42 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
     }
 
     /**
-     * Get the singleton instance of {@link FServerManager}.
+     * Get the default {@link FServerManager}, the one the online screens host.
      *
-     * @return the singleton FServerManager.
+     * @return the default FServerManager.
      */
     public static FServerManager getInstance() {
         if (instance == null) {
             instance = new FServerManager();
         }
         return instance;
+    }
+
+    /** Whether this server is hosting. */
+    public boolean isHosting() {
+        return isHosting;
+    }
+
+    @Override
+    public boolean hosts(final Game game) {
+        return hosting(game) == this;
+    }
+
+    /** Whether any server in this process is hosting. */
+    public static boolean isAnyHosting() {
+        return !HOSTING.isEmpty();
+    }
+
+    /** The hosting server whose lobby is playing {@code game}, or {@code null}. */
+    public static FServerManager hosting(final Game game) {
+        for (final FServerManager server : HOSTING) {
+            final ServerGameLobby lobby = server.localLobby;
+            final HostedMatch match = lobby == null ? null : lobby.getHostedMatch();
+            if (match != null && match.getGame() == game) {
+                return server;
+            }
+        }
+        return null;
     }
 
     /**
@@ -259,7 +297,7 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
                                     new SaturationLoggingHandler(),
                                     new RegisterClientHandler(),
                                     new DeregisterClientHandler(),
-                                    new GameServerHandler());
+                                    new GameServerHandler(FServerManager.this));
                         }
                     });
 
@@ -278,7 +316,9 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
                 mapNatPort();
             }
             Runtime.getRuntime().addShutdownHook(shutdownHook);
-            HostingServer.set(this);
+            isHosting = true;
+            HOSTING.add(this);
+            HostingServer.add(this);
         } catch (final InterruptedException e) {
             netLog.error(e, "Server start interrupted");
         }
@@ -312,7 +352,7 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
     }
     private synchronized void stopServer(final boolean removeShutdownHook) {
         // The shutdown hook and the channel-close thread both stop the server; only the first does the work
-        if (!HostingServer.isHosting()) {
+        if (!isHosting) {
             return;
         }
         // Cancel all reconnect timers
@@ -344,7 +384,9 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
         if (removeShutdownHook) {
             Runtime.getRuntime().removeShutdownHook(shutdownHook);
         }
-        HostingServer.set(null);
+        isHosting = false;
+        HOSTING.remove(this);
+        HostingServer.remove(this);
         NetworkLogConfig.deactivateNetworkLogging();
     }
 
@@ -409,7 +451,7 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server 
      */
     @Override
     public AfkTimeout armAfkTimeout(final PlayerControllerHuman controller, final InputSynchronized input) {
-        if (!HostingServer.isHosting() || localLobby == null) {
+        if (!isHosting || localLobby == null) {
             return AfkTimeout.NOOP;
         }
         final HostedMatch hostedMatch = localLobby.getHostedMatch();

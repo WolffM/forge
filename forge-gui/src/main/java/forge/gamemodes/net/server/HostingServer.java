@@ -1,10 +1,15 @@
 package forge.gamemodes.net.server;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import forge.game.Game;
+
 import forge.gamemodes.match.input.InputSynchronized;
 import forge.player.PlayerControllerHuman;
 
 /**
- * The server this process is hosting, if any. Match and input code ask here instead of
+ * The servers this process is hosting, if any (a process may host several, one per match). Match and input code ask here instead of
  * calling {@link FServerManager#getInstance()}, so a game that never hosts never loads
  * the network stack.
  */
@@ -19,23 +24,35 @@ public final class HostingServer {
     /** What match and input code need from a running server. */
     public interface Server {
         AfkTimeout armAfkTimeout(PlayerControllerHuman controller, InputSynchronized input);
+
+        /** Whether this server's match is playing {@code game}. */
+        boolean hosts(Game game);
     }
 
-    private static volatile Server active;
+    private static final Set<Server> ACTIVE = ConcurrentHashMap.newKeySet();
 
     private HostingServer() {
     }
 
-    static void set(final Server server) {
-        active = server;
+    static void add(final Server server) {
+        ACTIVE.add(server);
+    }
+
+    static void remove(final Server server) {
+        ACTIVE.remove(server);
     }
 
     public static boolean isHosting() {
-        return active != null;
+        return !ACTIVE.isEmpty();
     }
 
+    /** The AFK timeout of the server hosting the controller's game; none when no server hosts it. */
     public static AfkTimeout armAfkTimeout(final PlayerControllerHuman controller, final InputSynchronized input) {
-        final Server server = active;
-        return server == null ? AfkTimeout.NOOP : server.armAfkTimeout(controller, input);
+        for (final Server server : ACTIVE) {
+            if (server.hosts(controller.getGame())) {
+                return server.armAfkTimeout(controller, input);
+            }
+        }
+        return AfkTimeout.NOOP;
     }
 }

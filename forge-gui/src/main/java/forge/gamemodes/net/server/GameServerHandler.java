@@ -18,7 +18,7 @@ import java.util.Set;
 
 final class GameServerHandler extends GameProtocolHandler<IGameController> implements IHasForgeLog {
 
-    private final FServerManager server = FServerManager.getInstance();
+    private final FServerManager server;
 
     /**
      * A player's acts on the game: taken one at a time per game, in arrival order (ActGate), each once
@@ -34,8 +34,9 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
     /** The longest an act that came between two inputs is held for the next one. */
     private static final long BETWEEN_INPUTS_MS = 5_000;
 
-    GameServerHandler() {
+    GameServerHandler(final FServerManager server) {
         super(false);
+        this.server = server;
     }
 
     @Override

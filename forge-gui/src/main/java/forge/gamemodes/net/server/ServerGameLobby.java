@@ -66,7 +66,17 @@ public final class ServerGameLobby extends GameLobby implements IHasForgeLog {
         updateView(true);
     }
 
+    /** The server this lobby is hosted on. */
+    private final FServerManager server;
+
+    /** A lobby on the default server ({@link FServerManager#getInstance()}). */
     public ServerGameLobby() {
+        this(FServerManager.getInstance());
+    }
+
+    /** A lobby on {@code server}, one of several a process may host. */
+    public ServerGameLobby(final FServerManager server) {
+        this.server = server;
         final int[] avatarIndices = localAvatarIndices();
         final int[] sleeveIndices = localSleeveIndices();
 
@@ -147,7 +157,7 @@ public final class ServerGameLobby extends GameLobby implements IHasForgeLog {
 
     @Override
     protected IGuiGame getGui(final int index) {
-        return FServerManager.getInstance().getGui(index);
+        return server.getGui(index);
     }
 
     @Override
@@ -163,8 +173,8 @@ public final class ServerGameLobby extends GameLobby implements IHasForgeLog {
             }
         }
         super.onMatchOver();
-        FServerManager.getInstance().clearPlayerGuis();
-        FServerManager.getInstance().updateLobbyState();
+        server.clearPlayerGuis();
+        server.updateLobbyState();
     }
 
     /**
@@ -388,8 +398,6 @@ public final class ServerGameLobby extends GameLobby implements IHasForgeLog {
         }
 
         String eventId = event.getEventId();
-        FServerManager server = FServerManager.getInstance();
-
         for (EventParticipant participant : event.getParticipants()) {
             if (participant.isAI()) {
                 continue;
