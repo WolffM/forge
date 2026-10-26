@@ -77,6 +77,8 @@ public class AiAttackController {
 
     private int aiAggression = 0; // how aggressive the ai is attack will be depending on circumstances
     private final boolean nextTurn; // include creature that can only attack/block next turn
+    // System.nanoTime() past which a declaration stops adding attackers; 0 for a prediction, which has none
+    private long deadline = 0;
 
     /**
      * <p>
@@ -409,6 +411,10 @@ public class AiAttackController {
             CardLists.sortByPowerDesc(blockers);
 
             for (Card c : blockers) {
+                // out of time: the rest stay home to block
+                if (outOfTime()) {
+                    break;
+                }
                 if (vigilantes.contains(c)) {
                     // TODO predict the chance it might die if attacking
                     continue;
@@ -790,6 +796,12 @@ public class AiAttackController {
 
     final boolean LOG_AI_ATTACKS = false;
 
+    /** For the search's loop heads: unwinds if the game is over, true once the budget is spent. */
+    private boolean outOfTime() {
+        ai.getGame().throwIfOver();
+        return deadline != 0 && System.nanoTime() - deadline > 0;
+    }
+
     /**
      * <p>
      * Getter for the field <code>attackers</code>.
@@ -798,6 +810,19 @@ public class AiAttackController {
      * @return a {@link forge.game.combat.Combat} object.
      */
     public final int declareAttackers(final Combat combat) {
+        return declareAttackers(combat, 0);
+    }
+
+    /**
+     * Declares attackers within a time budget: once {@code budgetSeconds} are spent, the search
+     * stops adding attackers and keeps the ones it has (forced attackers come first), as the
+     * canPlay scan does at {@code Game.getAITimeout()}. 0 = no budget.
+     */
+    public final int declareAttackers(final Combat combat, final int budgetSeconds) {
+        if (budgetSeconds > 0 && deadline == 0) {
+            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(budgetSeconds);
+        }
+        ai.getGame().throwIfOver();
         // something prevents attacking, try another
         if (this.attackers.isEmpty() && ai.getOpponents().size() > 1) {
             final PlayerCollection opps = ai.getOpponents();
@@ -947,7 +972,9 @@ public class AiAttackController {
             }
 
             try {
-                executor.invokeAll(tasks, ai.getGame().getAITimeout(), TimeUnit.SECONDS);
+                final long budget = deadline != 0 ? Math.max(0, deadline - System.nanoTime())
+                        : TimeUnit.SECONDS.toNanos(ai.getGame().getAITimeout());
+                executor.invokeAll(tasks, budget, TimeUnit.NANOSECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } finally {
@@ -1027,6 +1054,9 @@ public class AiAttackController {
                     System.out.println("Exalted");
                 aiAggression = 6;
                 for (Card attacker : this.attackers) {
+                    if (outOfTime()) {
+                        break;
+                    }
                     if (canAttackWrapper(attacker, defender) && shouldAttack(attacker, this.blockers, combat, defender)) {
                         combat.addAttacker(attacker, defender);
                         return aiAggression;
@@ -1041,7 +1071,7 @@ public class AiAttackController {
             aiAggression = 6;
             for (Card attacker : this.attackers) {
                 // reached max, breakup
-                if (combat.getAttackers().size() >= attackMax)
+                if (combat.getAttackers().size() >= attackMax || outOfTime())
                     break;
                 if (canAttackWrapper(attacker, defender) && shouldAttack(attacker, this.blockers, combat, defender)) {
                     combat.addAttacker(attacker, defender);
@@ -1289,6 +1319,9 @@ public class AiAttackController {
         while (!left.isEmpty()) {
             CardCollection attackersAssigned = new CardCollection();
             for (int i = 0; i < left.size(); i++) {
+                if (outOfTime()) {
+                    return aiAggression;
+                }
                 final Card attacker = left.get(i);
                 if (aiAggression < 5 && !attacker.hasFirstStrike() && !attacker.hasDoubleStrike()
                         && ComputerUtilCombat.getTotalFirstStrikeBlockPower(attacker, defendingOpponent)

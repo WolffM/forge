@@ -2301,6 +2301,17 @@ public class GameAction {
         startGame(lastGameOutcome, null);
     }
     public void startGame(GameOutcome lastGameOutcome, Runnable startGameHook) {
+        try {
+            playGame(lastGameOutcome, startGameHook);
+        } catch (GameEndedException e) {
+            // the game ended while its thread was in an AI search, which unwound to here
+            if (e.getGame() != game) {
+                throw e;
+            }
+        }
+    }
+
+    private void playGame(GameOutcome lastGameOutcome, Runnable startGameHook) {
         Player first = determineFirstTurnPlayer(lastGameOutcome);
 
         GameType gameType = game.getRules().getGameType();

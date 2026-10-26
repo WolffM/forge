@@ -136,7 +136,8 @@ public class Game {
     private long timestamp = 0;
     public final GameAction action;
     private final Match match;
-    private GameStage age = GameStage.BeforeMulligan;
+    // volatile: throwIfOver reads it without the lock, from a search the lock must not stall
+    private volatile GameStage age = GameStage.BeforeMulligan;
     private GameOutcome outcome;
     private DrawOffer drawOffer;
 
@@ -567,6 +568,18 @@ public class Game {
 
     public synchronized boolean isGameOver() {
         return age == GameStage.GameOver;
+    }
+
+    /**
+     * For the loop heads of a long search done for this game (the AI's): once the game is over,
+     * the search is moot, and throwing is the only way to stop one that an interrupt cannot reach.
+     * Reads the stage without the lock, so a search still sees the end while {@link #setGameOver}
+     * holds it.
+     */
+    public void throwIfOver() {
+        if (age == GameStage.GameOver) {
+            throw new GameEndedException(this);
+        }
     }
 
     public synchronized void setGameOver(GameEndReason reason) {

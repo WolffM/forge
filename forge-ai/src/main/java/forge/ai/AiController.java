@@ -1309,7 +1309,7 @@ public class AiController {
     public void declareAttackers(Player attacker, Combat combat) {
         // 12/2/10(sol) the decision making here has moved to getAttackers()
         AiAttackController aiAtk = new AiAttackController(attacker);
-        lastAttackAggression = aiAtk.declareAttackers(combat);
+        lastAttackAggression = aiAtk.declareAttackers(combat, game.getAITimeout());
 
         aiAtk.reinforceWithBanding(combat);
 
@@ -1609,6 +1609,7 @@ public class AiController {
                 if (Thread.currentThread().isInterrupted()) {
                     break;
                 }
+                game.throwIfOver();
 
                 // Don't add Counterspells to the "normal" playcard lookups
                 if (skipCounter && sa.getApi() == ApiType.Counter) {
@@ -1692,6 +1693,9 @@ public class AiController {
         try {
             return future.get(game.getAITimeout(), TimeUnit.SECONDS);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            if (e.getCause() instanceof GameEndedException ended) {
+                throw ended; // the game ended mid-scan: this thread unwinds too
+            }
             e.printStackTrace();
             if (e instanceof TimeoutException) {
                 // log where the eval thread currently is - each timeout doubles as a
