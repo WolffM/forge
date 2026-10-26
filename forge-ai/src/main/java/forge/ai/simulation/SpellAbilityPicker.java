@@ -345,27 +345,25 @@ public class SpellAbilityPicker {
         // Use a deterministic random seed when evaluating different choices of a spell ability.
         // This is needed as otherwise random effects may result in a different number of choices
         // each iteration, which will break the logic in SpellAbilityChoicesIterator.
-        Random origRandom = MyRandom.getRandom();
-        long randomSeedToUse = origRandom.nextLong();
+        long randomSeedToUse = MyRandom.getRandom().nextLong();
 
         Score bestScore = new Score(Integer.MIN_VALUE);
         final SpellAbilityChoicesIterator choicesIterator = new SpellAbilityChoicesIterator(controller);
         Score lastScore;
         do {
-            // TODO: MyRandom should be an instance on the game object, so that we could do
-            // simulations in parallel without messing up global state.
-            MyRandom.setRandom(new Random(randomSeedToUse));
-            GameSimulator simulator = new GameSimulator(controller, game, player, phase);
-            simulator.setInterceptor(choicesIterator);
-            // I feel like something here is making a wrong assumption about what the target is
-            lastScore = simulator.simulateSpellAbility(sa);
+            // bound for this simulation only, so it neither consumes nor replaces the game's own random
+            try (MyRandom.Scope ignored = MyRandom.bind(new Random(randomSeedToUse))) {
+                GameSimulator simulator = new GameSimulator(controller, game, player, phase);
+                simulator.setInterceptor(choicesIterator);
+                // I feel like something here is making a wrong assumption about what the target is
+                lastScore = simulator.simulateSpellAbility(sa);
+            }
             numSimulations++;
             if (lastScore.value > bestScore.value) {
                 bestScore = lastScore;
             }
         } while (choicesIterator.advance(lastScore));
         controller.doneEvaluating(bestScore);
-        MyRandom.setRandom(origRandom);
         return bestScore;
     }
 

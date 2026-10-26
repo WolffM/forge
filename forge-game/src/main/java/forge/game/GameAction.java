@@ -2506,10 +2506,12 @@ public class GameAction {
 
     // Invokes given runnable in Game thread pool - used to start game and perform actions from UI (when game-0 waits for input)
     public void invoke(final Runnable proc) {
+        // bound to this game's random: the caller may be a UI thread, or another game's thread
+        final Runnable bound = MyRandom.bindTo(game.getRandom(), proc);
         if (ThreadUtil.isGameThread()) {
-            proc.run();
+            bound.run();
         } else {
-            ThreadUtil.invokeInGameThread(proc);
+            ThreadUtil.invokeInGameThread(bound);
         }
     }
 

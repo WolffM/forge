@@ -797,6 +797,11 @@ public class Game {
         return match;
     }
 
+    /** What this game draws from: its match's random (see {@link forge.util.MyRandom}). */
+    public final Random getRandom() {
+        return match.getRandom();
+    }
+
     /**
      * Get the player whose turn it is after a given player's turn, taking turn
      * order into account.

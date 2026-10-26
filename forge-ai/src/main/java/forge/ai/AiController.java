@@ -1679,7 +1679,8 @@ public class AiController {
 
             return null;
         });
-        Thread t = new Thread(future, "Game AI Eval");
+        // the eval thread draws from the deciding game's random, which this thread is bound to
+        Thread t = new Thread(MyRandom.propagate(future), "Game AI Eval");
         t.setDaemon(true);
         t.start();
         try {
