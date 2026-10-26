@@ -141,4 +141,20 @@ public class GameRandomTest extends AITest {
         AssertJUnit.assertSame(seeded, first.getRandom());
         MyRandom.setRandom(global);
     }
+
+    /** One game's AI starting a decision clears its own game's cache, never another's. */
+    @Test
+    public void anAiDecisionClearsOnlyItsOwnGamesCache() {
+        final Game a = initAndCreateGame();
+        final Game b = initAndCreateGame();
+        final int[] computed = new int[1];
+        final java.util.function.Supplier<Integer> count = () -> ++computed[0];
+        AssertJUnit.assertEquals(1, (int) AiCache.getCached(a, "k", count, null));
+        AssertJUnit.assertEquals(2, (int) AiCache.getCached(b, "k", count, null));
+        AiCache.clear(b);
+        AssertJUnit.assertEquals("a's entry survives b's clear", 1, (int) AiCache.getCached(a, "k", count, null));
+        AssertJUnit.assertEquals(3, (int) AiCache.getCached(b, "k", count, null));
+        AiCache.clear(a);
+        AssertJUnit.assertEquals(4, (int) AiCache.getCached(a, "k", count, null));
+    }
 }

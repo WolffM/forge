@@ -1720,7 +1720,7 @@ public class AiController {
     }
 
     private List<SpellAbility> chooseSpellAbilityToPlayImpl() {
-        AiCache.clear();
+        AiCache.clear(game);
         // Reset cached predicted combat, as it may be stale. It will be
         // re-created if needed and used for any AI logic that needs it.
         predictedCombat = null;
