@@ -59,6 +59,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -163,6 +165,8 @@ public final class FServerManager implements IHasForgeLog {
     private IDraftEventHandler draftHandler;
     private boolean UPnPMapped = false;
     private int port;
+    /** Set by {@link #requireCredential}: a peer must log in with it before anything else. */
+    private volatile byte[] credential;
     private static final Localizer localizer = Localizer.getInstance();
     private final Thread shutdownHook = new Thread(() -> {
         if (isHosting()) {
@@ -253,6 +257,15 @@ public final class FServerManager implements IHasForgeLog {
     }
 
     public void startServer(final int port) {
+        startServer(port, null);
+    }
+
+    /**
+     * Start listening on {@code port} at {@code bindAddress} only, or on every interface when it is
+     * {@code null}. A server whose clients all run on this machine passes the loopback address, so
+     * nothing elsewhere can reach it.
+     */
+    public void startServer(final int port, final InetAddress bindAddress) {
         this.port = port;
         String UPnPOption = FModel.getNetPreferences().getPref(ForgeNetPreferences.FNetPref.UPnP);
         boolean startUPnP;
@@ -276,7 +289,12 @@ public final class FServerManager implements IHasForgeLog {
                             final ChannelPipeline p = ch.pipeline();
                             p.addLast(
                                     new CompatibleObjectEncoder(byteTracker),
-                                    new CompatibleObjectDecoder(9766 * 1024, ClassResolvers.cacheDisabled(null)),
+                                    new CompatibleObjectDecoder(9766 * 1024, ClassResolvers.cacheDisabled(null)));
+                            final byte[] required = credential;
+                            if (required != null) {
+                                p.addLast(new CredentialGate(required));
+                            }
+                            p.addLast(
                                     new IdleStateHandler(HEARTBEAT_TIMEOUT_SECONDS, 0, 0, TimeUnit.SECONDS),
                                     new MessageHandler(),
                                     new SaturationLoggingHandler(),
@@ -287,7 +305,8 @@ public final class FServerManager implements IHasForgeLog {
                     });
 
             // Bind and start to accept incoming connections.
-            final ChannelFuture ch = b.bind(port).sync().channel().closeFuture();
+            final InetSocketAddress at = bindAddress == null ? new InetSocketAddress(port) : new InetSocketAddress(bindAddress, port);
+            final ChannelFuture ch = b.bind(at).sync().channel().closeFuture();
             new Thread(() -> {
                 try {
                     ch.sync();
@@ -511,9 +530,12 @@ public final class FServerManager implements IHasForgeLog {
         broadcastTo(event, IterableUtil.filter(clients.values(), filter));
     }
 
+    /** Only to peers that have logged in: one that has not may be anybody, and hears nothing. */
     private void broadcastTo(final NetEvent event, final Iterable<RemoteClient> to) {
         for (final RemoteClient client : to) {
-            broadcastTo(event, client);
+            if (client.hasValidSlot()) {
+                broadcastTo(event, client);
+            }
         }
     }
 
@@ -1048,7 +1070,9 @@ public final class FServerManager implements IHasForgeLog {
                     return; // Suppress slash commands from remote clients
                 }
                 final RemoteClient client = clients.get(ctx.channel());
-                if (client == null) {
+                if (client == null || !client.hasValidSlot()) {
+                    // Chat is for players: a peer that has not logged in may be anybody.
+                    super.channelRead(ctx, msg);
                     return;
                 }
                 // Strip control characters before echoing to other players: a
@@ -1063,6 +1087,43 @@ public final class FServerManager implements IHasForgeLog {
                 broadcast(new MessageEvent(username, text));
             }
             super.channelRead(ctx, msg);
+        }
+    }
+
+    /**
+     * Admit only this server's own clients: a peer must log in with the credential before it sends
+     * anything else, or it is closed. Accepted chat, lobby state and the reconnect path all sit behind
+     * a login, so a peer that cannot present the credential reaches none of them, and since it never
+     * holds a slot its disconnect is never a player's. Set it with {@link #requireCredential} before
+     * {@link #startServer}.
+     */
+    public void requireCredential(final String credential) {
+        if (isHosting) {
+            throw new IllegalStateException("requireCredential after startServer would admit the peers already connected");
+        }
+        this.credential = credential == null ? null : credential.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** First in line after the decoder; leaves the pipeline once its peer has logged in with the credential. */
+    private final class CredentialGate extends ChannelInboundHandlerAdapter {
+        private final byte[] required;
+
+        CredentialGate(final byte[] required) {
+            this.required = required;
+        }
+
+        @Override
+        public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+            final String presented = msg instanceof LoginEvent login ? login.getCredential() : null;
+            if (presented != null && MessageDigest.isEqual(required,
+                    presented.getBytes(StandardCharsets.UTF_8))) {
+                ctx.pipeline().remove(this);
+                super.channelRead(ctx, msg);
+                return;
+            }
+            netLog.warn("Refusing {}: {} without this server's credential", ctx.channel().remoteAddress(),
+                    msg instanceof LoginEvent ? "a login" : msg.getClass().getSimpleName());
+            ctx.close();
         }
     }
 

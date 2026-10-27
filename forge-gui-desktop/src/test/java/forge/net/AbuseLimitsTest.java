@@ -6,8 +6,8 @@ import org.testng.annotations.Test;
 
 /**
  * Remote text must not be able to write into the host's log or into another
- * player's chat pane. Chat is accepted before login and rebroadcast to
- * everyone, and the username is echoed into both.
+ * player's chat pane. A logged-in player's chat is rebroadcast to everyone,
+ * and the username is echoed into both.
  *
  * <p>The connection cap and the login deadline are not covered here: reaching
  * them needs a raw protocol peer, and such a test would be stress-gated out of
