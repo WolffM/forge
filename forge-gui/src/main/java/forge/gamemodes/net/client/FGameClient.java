@@ -77,6 +77,7 @@ public class FGameClient implements IToServer, IHasForgeLog {
     });
     private volatile ScheduledFuture<?> resumeWatch;
     private volatile ScheduledFuture<?> pendingAttempt;
+    private volatile String credential;
 
     public FGameClient(String username, IGuiGame clientGui, String hostname, int port) {
         this.username = username;
@@ -87,6 +88,15 @@ public class FGameClient implements IToServer, IHasForgeLog {
 
     public String getUsername() {
         return username;
+    }
+
+    /** Presented at login, to a server that admits only its own clients ({@code FServerManager#requireCredential}). */
+    public void setCredential(final String credential) {
+        this.credential = credential;
+    }
+
+    String getCredential() {
+        return credential;
     }
 
     final IGuiGame getGui() {
