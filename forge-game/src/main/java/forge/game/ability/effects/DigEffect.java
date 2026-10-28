@@ -265,7 +265,7 @@ public class DigEffect extends SpellAbilityEffect {
                 } else if (sa.hasParam("RandomChange")) {
                     int numChanging = Math.min(destZone1ChangeNum, valid.size());
                     movedCards = CardLists.getRandomSubList(valid, numChanging);
-                } else if (totalCMC) {
+                } else if (totalCMC && chooser.getController().isAI()) {
                     movedCards = new CardCollection();
                     if (valid.isEmpty()) {
                         chooser.getController().notifyOfValue(sa, null,
@@ -288,7 +288,7 @@ public class DigEffect extends SpellAbilityEffect {
                                 Localizer.getInstance().getMessage("lblPlayerPickedChosen",
                                         chooser.getName(), ""));
                     }
-                } else if (sa.hasParam("ForEachColorPair")) {
+                } else if (sa.hasParam("ForEachColorPair") && chooser.getController().isAI()) {
                     movedCards = new CardCollection();
                     for (final byte pair : MagicColor.COLORPAIR) {
                         Card chosen = chooser.getController().chooseSingleEntityForEffect(CardLists.filter(valid,
@@ -301,7 +301,7 @@ public class DigEffect extends SpellAbilityEffect {
                     if (!movedCards.isEmpty()) {
                         game.getAction().reveal(movedCards, chooser, true, Localizer.getInstance().getMessage("lblPlayerPickedChosen", chooser.getName(), ""));
                     }
-                } else if (sa.hasParam("WithDifferentPowers")) {
+                } else if (sa.hasParam("WithDifferentPowers") && chooser.getController().isAI()) {
                     movedCards = new CardCollection();
                     while (!valid.isEmpty() && (anyNumber || movedCards.size() < destZone1ChangeNum)) {
                         String title = Localizer.getInstance().getMessage(movedCards.isEmpty()?"lblChooseCreature":"lblChooseCreatureWithDiffPower");
@@ -338,10 +338,19 @@ public class DigEffect extends SpellAbilityEffect {
                     if (valid.isEmpty()) {
                         chooser.getController().notifyOfValue(sa, null, Localizer.getInstance().getMessage("lblNoValidCards"));
                     } else {
-                        int max = anyNumber ? valid.size() : Math.min(valid.size(), destZone1ChangeNum);
-                        int min = (anyNumber || optional) ? 0 : max;
+                        // a colour pair each (ForEachColorPair): every card exactly one pair's colours is offered, one ask fills them all
+                        final List<CardCollection> slots = ChosenSet.slots(sa, valid);
+                        final CardCollection offered = slots.isEmpty() ? valid : ChosenSet.fitting(slots, valid);
+                        int max = anyNumber ? offered.size() : Math.min(offered.size(), slots.isEmpty() ? destZone1ChangeNum : slots.size());
+                        int min = (anyNumber || optional || ChosenSet.constrains(sa)) ? 0 : max;
                         if (max > 0) { // if max is 0 don't make a choice
-                            movedCards.addAll(chooser.getController().chooseEntitiesForEffect(valid, min, max, delayedReveal, sa, prompt, p, null));
+                            List<Card> picked;
+                            do {
+                                picked = chooser.getController().chooseEntitiesForEffect(offered, min, max, delayedReveal, sa, prompt, p, null);
+                            } while (picked != null && (picked.size() > max || !ChosenSet.meets(picked, sa, offered)));
+                            if (picked != null) {
+                                movedCards.addAll(picked);
+                            }
                         }
                     }
 

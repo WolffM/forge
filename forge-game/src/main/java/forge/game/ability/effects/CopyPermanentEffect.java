@@ -207,7 +207,16 @@ public class CopyPermanentEffect extends TokenEffectBase {
                 if (!choices.isEmpty()) {
                     String title = sa.hasParam("ChoiceTitle") ? sa.getParam("ChoiceTitle") : Localizer.getInstance().getMessage("lblChooseaCard");
 
-                    if (sa.hasParam("WithDifferentNames")) {
+                    if (sa.hasParam("WithDifferentNames") && !chooser.getController().isAI()) {
+                        // any number with different names, chosen as one set (ChosenSet)
+                        List<Card> picked;
+                        do {
+                            picked = chooser.getController().chooseEntitiesForEffect(choices, 0, choices.size(), null, sa, title, null, null);
+                        } while (picked != null && !ChosenSet.meets(picked, sa));
+                        if (picked != null) {
+                            tgtCards.addAll(picked);
+                        }
+                    } else if (sa.hasParam("WithDifferentNames")) {
                         // any Number of choices with different names
                         while (!choices.isEmpty()) {
                             Card choosen = chooser.getController().chooseSingleEntityForEffect(choices, sa, title, true, null);
