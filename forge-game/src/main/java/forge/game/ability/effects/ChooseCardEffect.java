@@ -116,7 +116,9 @@ public class ChooseCardEffect extends SpellAbilityEffect {
                 }
             }
             boolean dontRevealToOwner = true;
-            if (sa.hasParam("EachBasicType")) {
+            if (!p.getController().isAI() && atOnce(sa)) {
+                chosen.addAll(chooseAtOnce(p, pChoices, sa, validAmount, minAmount));
+            } else if (sa.hasParam("EachBasicType")) {
                 // Choose one of each BasicLand given special place
                 for (final String type : CardType.getBasicTypes()) {
                     final CardCollectionView cl = CardLists.getType(pChoices, type);
@@ -299,5 +301,46 @@ public class ChooseCardEffect extends SpellAbilityEffect {
         if (sa.hasParam("ImprintChosen")) {
             host.addImprintedCards(allChosen);
         }
+    }
+
+    /** The picks a person makes as one set ({@link ChosenSet}) rather than one card at a time. */
+    private static boolean atOnce(final SpellAbility sa) {
+        return ChosenSet.slotted(sa) || sa.hasParam("WithTotalPower") || sa.hasParam("WithDifferentPowers");
+    }
+
+    /**
+     * One ask for the whole set: a card of each type or power ({@code EachBasicType}, {@code ChooseEach},
+     * {@code EachDifferentPower}),
+     * creatures of a total power ({@code WithTotalPower}) or of different powers
+     * ({@code WithDifferentPowers}), asked again until the set meets its rules.
+     */
+    private static List<Card> chooseAtOnce(final Player p, final CardCollectionView pChoices, final SpellAbility sa,
+                                           final int validAmount, final int minAmount) {
+        final CardCollectionView offered;
+        int min = 0;
+        int max;
+        if (ChosenSet.slotted(sa)) {
+            final List<CardCollection> slots = ChosenSet.slots(sa, pChoices);
+            offered = ChosenSet.fitting(slots, pChoices);
+            max = slots.size();
+        } else if (sa.hasParam("WithTotalPower")) {
+            offered = p.getCreaturesInPlay();
+            max = offered.size();
+        } else {
+            offered = pChoices;
+            max = validAmount;
+            min = minAmount;
+        }
+        max = Math.min(max, offered.size());
+        min = Math.min(min, max);
+        if (max <= 0) {
+            return new ArrayList<>();
+        }
+        final String title = Localizer.getInstance().getMessage(max == 1 ? "lblChooseaCard" : "lblChooseCards");
+        List<Card> picked;
+        do {
+            picked = p.getController().chooseEntitiesForEffect(offered, min, max, null, sa, title, null, null);
+        } while (picked != null && (picked.size() > max || !ChosenSet.meets(picked, sa, offered)));
+        return picked == null ? new ArrayList<>() : picked;
     }
 }

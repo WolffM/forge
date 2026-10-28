@@ -5,7 +5,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import forge.card.CardStateName;
-import forge.card.CardType;
 import forge.game.*;
 import forge.game.ability.AbilityFactory;
 import forge.game.ability.AbilityKey;
@@ -1117,7 +1116,8 @@ public class ChangeZoneEffect extends SpellAbilityEffect {
             int totCardTypes = AbilityUtils.calculateAmount(source, totalCardTypes, sa);
 
             CardCollection chosenCards = new CardCollection();
-            if (changeType.startsWith("EACH")) {
+            final boolean each = changeType.startsWith("EACH");
+            if (each && !allowMultiSelect(decider, sa)) {
                 String[] eachTypes = changeType.substring(5).split(" & ");
                 for (String thisType : eachTypes) {
                     for (int i = 0; i < changeNum; i++) {
@@ -1133,23 +1133,28 @@ public class ChangeZoneEffect extends SpellAbilityEffect {
                         chosenCards.add(c);
                     }
                 }
-            } else if (changeNum > 1 && allowMultiSelect(decider, sa)) {
+            } else if ((each || changeNum > 1) && allowMultiSelect(decider, sa)) {
                 // only multi-select if player can select more than one
                 List<Card> selectedCards;
                 if (!sa.hasParam("SelectPrompt")) {
                     // new default messaging for multi select
-                    if (fetchList.size() > changeNum) {
+                    if (!each && fetchList.size() > changeNum) {
                         //Select up to %changeNum cards from %players %origin
                         selectPrompt = MessageUtil.formatMessage(Localizer.getInstance().getMessage("lblSelectUpToNumCardFromPlayerZone", String.valueOf(changeNum), "{player's}", Lang.joinHomogenous(origin, ZoneType::getTranslatedName).toLowerCase()), decider, player);
                     } else {
                         selectPrompt = MessageUtil.formatMessage(Localizer.getInstance().getMessage("lblSelectCardsFromPlayerZone", "{player's}", Lang.joinHomogenous(origin, ZoneType::getTranslatedName).toLowerCase()), decider, player);
                     }
                 }
+                // one card for each EACH type: every card fitting one is offered, and one ask fills them all
+                final List<CardCollection> slots = ChosenSet.slots(sa, fetchList);
+                final CardCollection offered = each ? ChosenSet.fitting(slots, fetchList) : fetchList;
+                final int most = each ? slots.size() : changeNum;
                 // ensure that selection is within maximum allowed changeNum
-                final int multiMin = sa.hasParam("Mandatory") ? Math.min(changeNum, fetchList.size()) : 0;
+                final int multiMin = !sa.hasParam("Mandatory") ? 0
+                        : each ? ChosenSet.matched(slots, offered) : Math.min(changeNum, fetchList.size());
                 do {
-                    selectedCards = decider.getController().chooseCardsForZoneChange(destination, origin, sa, fetchList, multiMin, changeNum, delayedReveal, selectPrompt, decider);
-                } while (selectedCards != null && (selectedCards.size() > changeNum || !meetsSearchConstraints(selectedCards, sa)));
+                    selectedCards = decider.getController().chooseCardsForZoneChange(destination, origin, sa, offered, multiMin, most, delayedReveal, selectPrompt, decider);
+                } while (selectedCards != null && (selectedCards.size() > most || !ChosenSet.meets(selectedCards, sa, offered)));
                 if (selectedCards != null) {
                     chosenCards.addAll(selectedCards);
                 }
@@ -1575,61 +1580,6 @@ public class ChangeZoneEffect extends SpellAbilityEffect {
         return !decider.getController().isAI()
                 && !sa.hasParam("AtRandom")
                 && (!sa.hasParam("Defined") || sa.hasParam("ChooseFromDefined"));
-    }
-
-    /**
-     * Whether a set of cards chosen at once satisfies the search's constraints
-     * (DifferentNames, DifferentCMC, DifferentPower, ShareLandType, WithTotalCMC,
-     * WithTotalPower, WithTotalCardTypes). Choosing one card at a time enforces
-     * the same rules by narrowing the list after each pick; a multi-select is
-     * asked again until its whole set meets them. Choosing nothing always does.
-     */
-    public static boolean meetsSearchConstraints(final List<Card> chosen, final SpellAbility sa) {
-        if (chosen.isEmpty()) {
-            return true;
-        }
-        for (int i = 0; i < chosen.size(); i++) {
-            for (int j = i + 1; j < chosen.size(); j++) {
-                final Card a = chosen.get(i);
-                final Card b = chosen.get(j);
-                if (sa.hasParam("DifferentNames") && a.sharesNameWith(b)) {
-                    return false;
-                }
-                if (sa.hasParam("DifferentCMC") && a.sharesCMCWith(b)) {
-                    return false;
-                }
-                if (sa.hasParam("DifferentPower") && a.getNetPower() == b.getNetPower()) {
-                    return false;
-                }
-                if (sa.hasParam("ShareLandType") && !a.sharesLandTypeWith(b)) {
-                    return false;
-                }
-            }
-        }
-        final Card source = sa.getHostCard();
-        if (sa.hasParam("WithTotalCMC")) {
-            final int most = AbilityUtils.calculateAmount(source, sa.getParam("WithTotalCMC"), sa);
-            if (most >= 0 && chosen.stream().mapToInt(Card::getCMC).sum() > most) {
-                return false;
-            }
-        }
-        if (sa.hasParam("WithTotalPower")) {
-            final int most = AbilityUtils.calculateAmount(source, sa.getParam("WithTotalPower"), sa);
-            if (most >= 0 && chosen.stream().mapToInt(Card::getNetPower).sum() > most) {
-                return false;
-            }
-        }
-        if (sa.hasParam("WithTotalCardTypes")) {
-            final int least = AbilityUtils.calculateAmount(source, sa.getParam("WithTotalCardTypes"), sa);
-            final Set<CardType.CoreType> types = Sets.newHashSet();
-            for (final Card c : chosen) {
-                Iterables.addAll(types, c.getType().getCoreTypes());
-            }
-            if (types.size() < least) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /**

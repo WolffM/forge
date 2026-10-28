@@ -18,6 +18,7 @@ import forge.game.*;
 import forge.game.ability.AbilityKey;
 import forge.game.ability.AbilityUtils;
 import forge.game.ability.ApiType;
+import forge.game.ability.effects.ChosenSet;
 import forge.game.ability.effects.RollDiceEffect;
 import forge.game.card.*;
 import forge.game.card.CardView.CardStateView;
@@ -444,6 +445,8 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
     private boolean useSelectCardsInput(final FCollectionView<? extends GameEntity> sourceList, final SpellAbility sa) {
         // would reveal illegal zone information
         if (sa != null && ApiType.Heist.equals(sa.getApi())) return false;
+        // a set with rules (ChosenSet) is chosen in one list that can check it, not card by card on the table
+        if (ChosenSet.constrains(sa)) return false;
 
         // can't use InputSelect from GUI thread (e.g., DevMode Tutor)
         if (FThreads.isGuiThread()) {
