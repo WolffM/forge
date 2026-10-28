@@ -124,7 +124,7 @@ public final class ChosenSet {
     /**
      * Each slot, with the cards of {@code cards} that fit it, in the order the one-at-a-time asks
      * went: each {@code EACH} type {@code ChangeNum} times, each {@code ChooseEach} type (the party's
-     * four for {@code Party}), each basic land type, each power among the cards, each colour pair
+     * four for {@code Party}), each basic land type in WUBRG order, each power among the cards, each colour pair
      * (named by its colours' letters). Empty for any other ability.
      */
     public static List<Slot> named(final SpellAbility sa, final Iterable<Card> cards) {
@@ -146,7 +146,7 @@ public final class ChosenSet {
             }
             case ChooseCard:
                 if (sa.hasParam("EachBasicType")) {
-                    for (final String type : CardType.getBasicTypes()) {
+                    for (final String type : MagicColor.Constant.BASIC_LANDS) {
                         out.add(new Slot(type, CardLists.getType(pool, type)));
                     }
                 } else if (sa.hasParam("EachDifferentPower")) {
