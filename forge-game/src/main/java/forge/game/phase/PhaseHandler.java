@@ -1400,6 +1400,7 @@ public class PhaseHandler implements IHasForgeLog {
             setPlayerTurn(player0);
         }
         turn = cturn;
+        game.updateTurnForView();
 
         game.fireEvent(new GameEventTurnPhase(playerTurn, phase, "dev"));
         if (endCombat) {

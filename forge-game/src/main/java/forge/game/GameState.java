@@ -95,6 +95,7 @@ public class GameState {
     private final Set<Card> cardsWithoutETBTrigs = new HashSet<>();
 
     private String tChangePlayer = "NONE";
+    private boolean restore = false;
     private String tChangePhase = "NONE";
 
     private String tAdvancePhase = "NONE";
@@ -603,6 +604,11 @@ public class GameState {
         }
     }
 
+    /** This state is a game's own, taken by {@link #initFromGame}: put it back as it was, running no replacement effect. */
+    public void setRestore(final boolean restore) {
+        this.restore = restore;
+    }
+
     public void applyToGame(final Game game) {
         game.getAction().invoke(() -> applyGameOnThread(game));
     }
@@ -640,8 +646,15 @@ public class GameState {
 
         game.getTriggerHandler().setSuppressAllTriggers(true);
 
-        for (int i = 0; i < playerStates.size(); i++) {
-            setupPlayerState(game.getPlayers().get(i), playerStates.get(i));
+        // A restored board already says how each permanent entered (tapped, counters, choices):
+        // "enters tapped", "you may pay 2 life" and "enters with N counters" must not run again.
+        game.getReplacementHandler().setSuppressAll(restore);
+        try {
+            for (int i = 0; i < playerStates.size(); i++) {
+                setupPlayerState(game.getPlayers().get(i), playerStates.get(i));
+            }
+        } finally {
+            game.getReplacementHandler().setSuppressAll(false);
         }
         handleCardAttachments();
         handleChosenEntities();
@@ -1286,8 +1299,11 @@ public class GameState {
             Card c;
             boolean hasSetCurSet = false;
             if (cardinfo[0].startsWith("t:")) {
-                // TOKEN_PIPE is used for fixing the imagekey of tokens, restore the format for TokenInfo parser
+                // TOKEN_PIPE is used for fixing the imagekey of tokens, restore the format for TokenInfo parser.
+                // A state written before that escaped the image's '|' as '/' instead: read that form back too.
                 String tokenStr = cardinfo[0].substring(2).replace(TOKEN_PIPE, "|");
+                int image = tokenStr.lastIndexOf("Image:");
+                if (image >= 0) tokenStr = tokenStr.substring(0, image) + tokenStr.substring(image).replace('/', '|');
                 c = new TokenInfo(tokenStr).makeOneToken(player);
             } else if (cardinfo[0].startsWith("T:")) {
                 String tokenStr = cardinfo[0].substring(2);
