@@ -1210,6 +1210,7 @@ public class PhaseHandler implements java.io.Serializable, IHasForgeLog {
             setPlayerTurn(player0);
         }
         turn = cturn;
+        game.updateTurnForView();
 
         game.fireEvent(new GameEventTurnPhase(playerTurn, phase, "dev"));
         if (endCombat) {

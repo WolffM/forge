@@ -184,7 +184,17 @@ public class ReplacementHandler {
      *            the run params,same as for triggers.
      * @return ReplacementResult, an enum that represents what happened to the replacement effect.
      */
+    /** While set, nothing is replaced: {@link forge.game.GameState} restoring a board it took. */
+    private boolean suppressAll = false;
+
+    public void setSuppressAll(final boolean suppress) {
+        suppressAll = suppress;
+    }
+
     public ReplacementResult run(ReplacementType event, final Map<AbilityKey, Object> runParams) {
+        if (suppressAll) {
+            return ReplacementResult.NotReplaced;
+        }
         final Object affected = runParams.get(AbilityKey.Affected);
         Player decider = null;
 
