@@ -336,7 +336,7 @@ public class ChosenSetTest extends AITest {
         SpellAbility passage = carrying(addCardToZone("Guided Passage", p, ZoneType.Hand), "ChangeType", "DBCreature");
         SpellAbility ruin = spell(addCardToZone("Global Ruin", p, ZoneType.Hand));
         SpellAbility cataclysm = spell(addCardToZone("Cataclysm", p, ZoneType.Hand));
-        SpellAbility niv = carrying(addCard("Niv-Mizzet Reborn", p), "ForEachColorPair", null);
+        SpellAbility niv = carrying(addCard("Niv-Mizzet Reborn", p), "ForEachColorPair", "TrigDig");
         Card volcanic = addCard("Volcanic Island", p);
 
         List<String> kinds = new ArrayList<>();
