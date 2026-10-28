@@ -289,4 +289,68 @@ public class ChosenSetTest extends AITest {
         AssertJUnit.assertTrue(ChosenSet.meets(List.of(bears, ornithopter), battle));
         AssertJUnit.assertFalse(ChosenSet.meets(List.of(bears, otherBears), battle));
     }
+
+    @Test
+    public void aSearchFindsADifferentCardForEachKind() {
+        Game game = initAndCreateGame();
+        Player p = you(game);
+        SpellAbility passage = carrying(addCardToZone("Guided Passage", p, ZoneType.Hand), "ChangeType", "DBCreature");
+        Card arbor = library("Dryad Arbor", p);
+        Card forest = library("Forest", p);
+        Card bears = library("Grizzly Bears", p);
+        Card bolt = library("Lightning Bolt", p);
+        List<Card> offered = List.of(arbor, forest, bears, bolt);
+
+        AssertJUnit.assertTrue(ChosenSet.mustFill(passage));
+        AssertJUnit.assertTrue(ChosenSet.distinct(passage));
+        // Dryad Arbor is one card found: it is the creature or the land, never both, while a Forest could be the land.
+        AssertJUnit.assertFalse(ChosenSet.meets(List.of(arbor, bolt), passage, offered));
+        AssertJUnit.assertTrue(ChosenSet.meets(List.of(arbor, forest, bolt), passage, offered));
+        AssertJUnit.assertTrue(ChosenSet.meets(List.of(arbor, bears, bolt), passage, offered));
+        AssertJUnit.assertTrue(ChosenSet.meets(List.of(bears, forest, bolt), passage, offered));
+        AssertJUnit.assertFalse(ChosenSet.meets(List.of(bears, forest), passage, offered));
+    }
+
+    @Test
+    public void aSearchFillsWhatDifferentCardsCan() {
+        Game game = initAndCreateGame();
+        Player p = you(game);
+        SpellAbility passage = carrying(addCardToZone("Guided Passage", p, ZoneType.Hand), "ChangeType", "DBCreature");
+        Card arbor = library("Dryad Arbor", p);
+        Card forest = library("Forest", p);
+        Card bolt = library("Lightning Bolt", p);
+
+        // Dryad Arbor alone is not enough while another land exists: it is the creature, the Forest the land.
+        AssertJUnit.assertFalse(ChosenSet.meets(List.of(arbor), passage, List.of(arbor, forest)));
+        AssertJUnit.assertFalse(ChosenSet.meets(List.of(forest), passage, List.of(arbor, forest)));
+        AssertJUnit.assertTrue(ChosenSet.meets(List.of(arbor, forest), passage, List.of(arbor, forest)));
+        // With no other creature or land, Dryad Arbor is the one card those kinds can find.
+        AssertJUnit.assertTrue(ChosenSet.meets(List.of(arbor, bolt), passage, List.of(arbor, bolt)));
+        AssertJUnit.assertFalse(ChosenSet.meets(List.of(arbor), passage, List.of(arbor, bolt)));
+    }
+
+    @Test
+    public void slotsAreNamedAndChoicesOfPermanentsMayCountTwice() {
+        Game game = initAndCreateGame();
+        Player p = you(game);
+        SpellAbility passage = carrying(addCardToZone("Guided Passage", p, ZoneType.Hand), "ChangeType", "DBCreature");
+        SpellAbility ruin = spell(addCardToZone("Global Ruin", p, ZoneType.Hand));
+        SpellAbility cataclysm = spell(addCardToZone("Cataclysm", p, ZoneType.Hand));
+        SpellAbility niv = carrying(addCard("Niv-Mizzet Reborn", p), "ForEachColorPair", null);
+        Card volcanic = addCard("Volcanic Island", p);
+
+        List<String> kinds = new ArrayList<>();
+        ChosenSet.named(passage, List.of()).forEach(slot -> kinds.add(slot.kind()));
+        AssertJUnit.assertEquals(List.of("Creature.YouOwn", "Land.YouOwn", "Card.nonCreature+nonLand+YouOwn"), kinds);
+        kinds.clear();
+        ChosenSet.named(ruin, List.of(volcanic)).forEach(slot -> kinds.add(slot.kind()));
+        AssertJUnit.assertEquals(List.of("Plains", "Island", "Swamp", "Mountain", "Forest"), kinds);
+        AssertJUnit.assertEquals("WU", ChosenSet.named(niv, List.of()).get(0).kind());
+
+        AssertJUnit.assertTrue(ChosenSet.distinct(niv));
+        AssertJUnit.assertFalse(ChosenSet.distinct(ruin));
+        AssertJUnit.assertFalse(ChosenSet.distinct(cataclysm));
+        // Global Ruin chooses permanents: Volcanic Island is its Island and its Mountain.
+        AssertJUnit.assertTrue(ChosenSet.meets(List.of(volcanic), ruin, List.of(volcanic)));
+    }
 }

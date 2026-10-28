@@ -35,7 +35,9 @@ import java.util.TreeMap;
  * <li>Slots ({@link #slots}): one card for each of a list of kinds — {@code ChangeZone}'s
  *     {@code ChangeType$ EACH a & b}, {@code ChooseCard}'s {@code ChooseEach}, {@code EachBasicType}
  *     and {@code EachDifferentPower}, {@code Dig}'s {@code ForEachColorPair}. Every chosen card holds a slot
- *     of its own; with {@link #mustFill} every slot some offered card fits is held.</li>
+ *     of its own. With {@link #mustFill} the slots are filled: by as many different cards as can hold
+ *     one where each kind is a card found ({@link #distinct}), or else every slot some offered card fits
+ *     answered by a chosen card that fits it, one card answering several.</li>
  * </ul>
  * Choosing nothing meets every rule but {@link #mustFill}'s.
  */
@@ -87,7 +89,7 @@ public final class ChosenSet {
     }
 
     /**
-     * Whether every slot that some offered card fits must be held: a {@code Mandatory} search or
+     * Whether the slots must be filled ({@link #meets}): a {@code Mandatory} search or
      * {@code ChooseEach}, and every {@code EachBasicType}, {@code EachDifferentPower} and {@code ForEachColorPair}, whose
      * one-at-a-time asks could not be declined.
      */
@@ -99,12 +101,34 @@ public final class ChosenSet {
     }
 
     /**
-     * For each slot, the cards of {@code cards} that fit it, in the order the one-at-a-time asks
-     * went: each {@code EACH} type {@code ChangeNum} times, each {@code ChooseEach} type (the party's
-     * four for {@code Party}), each basic land type, each power among the cards, each colour pair. Empty for any other ability.
+     * Whether each kind must be a different card: what a search, a reveal or a dig finds is one card
+     * found once, whatever kinds it is. A {@code ChooseCard} choice of permanents is not — its rulings
+     * let one permanent count as every kind it is (Cataclysm, Global Ruin, Sundering Titan).
      */
+    public static boolean distinct(final SpellAbility sa) {
+        return slotted(sa) && sa.getApi() != ApiType.ChooseCard;
+    }
+
+    /** One slot: the kind it asks for, as the ability names it, and the cards that fit it. */
+    public record Slot(String kind, CardCollection fits) { }
+
+    /** The cards of each slot of {@link #named}. */
     public static List<CardCollection> slots(final SpellAbility sa, final Iterable<Card> cards) {
         final List<CardCollection> out = new ArrayList<>();
+        for (final Slot slot : named(sa, cards)) {
+            out.add(slot.fits());
+        }
+        return out;
+    }
+
+    /**
+     * Each slot, with the cards of {@code cards} that fit it, in the order the one-at-a-time asks
+     * went: each {@code EACH} type {@code ChangeNum} times, each {@code ChooseEach} type (the party's
+     * four for {@code Party}), each basic land type, each power among the cards, each colour pair
+     * (named by its colours' letters). Empty for any other ability.
+     */
+    public static List<Slot> named(final SpellAbility sa, final Iterable<Card> cards) {
+        final List<Slot> out = new ArrayList<>();
         if (!slotted(sa)) {
             return out;
         }
@@ -115,7 +139,7 @@ public final class ChosenSet {
                 for (final String type : sa.getParam("ChangeType").substring(5).split(" & ")) {
                     final CardCollection fits = new CardCollection(AbilityUtils.filterListByType(pool, type, sa));
                     for (int i = 0; i < perType; i++) {
-                        out.add(fits);
+                        out.add(new Slot(type.trim(), fits));
                     }
                 }
                 break;
@@ -123,25 +147,31 @@ public final class ChosenSet {
             case ChooseCard:
                 if (sa.hasParam("EachBasicType")) {
                     for (final String type : CardType.getBasicTypes()) {
-                        out.add(CardLists.getType(pool, type));
+                        out.add(new Slot(type, CardLists.getType(pool, type)));
                     }
                 } else if (sa.hasParam("EachDifferentPower")) {
                     final TreeMap<Integer, CardCollection> byPower = new TreeMap<>();
                     for (final Card c : pool) {
                         byPower.computeIfAbsent(c.getNetPower(), k -> new CardCollection()).add(c);
                     }
-                    out.addAll(byPower.values());
+                    byPower.forEach((power, fits) -> out.add(new Slot(String.valueOf(power), fits)));
                 } else {
                     final String each = sa.getParam("ChooseEach");
                     final Collection<String> types = each.equals("Party") ? CardType.Constant.PARTY_TYPES : Arrays.asList(each.split(" & "));
                     for (final String type : types) {
-                        out.add(CardLists.filter(pool, CardPredicates.isType(type)));
+                        out.add(new Slot(type, CardLists.filter(pool, CardPredicates.isType(type))));
                     }
                 }
                 break;
             case Dig:
                 for (final byte pair : MagicColor.COLORPAIR) {
-                    out.add(CardLists.filter(pool, CardPredicates.isExactlyColor(pair)));
+                    final StringBuilder letters = new StringBuilder();
+                    for (final byte color : MagicColor.WUBRG) {
+                        if ((pair & color) != 0) {
+                            letters.append(MagicColor.toShortString(color));
+                        }
+                    }
+                    out.add(new Slot(letters.toString(), CardLists.filter(pool, CardPredicates.isExactlyColor(pair))));
                 }
                 break;
             default:
@@ -200,10 +230,20 @@ public final class ChosenSet {
         return true;
     }
 
-    /** Whether {@code chosen}, chosen at once from {@code offered}, meets every rule of {@code sa}. */
+    /**
+     * Whether {@code chosen}, chosen at once from {@code offered}, meets every rule of {@code sa}. With
+     * {@link #mustFill}, a {@link #distinct} set holds as many slots as any set of offered cards could;
+     * any other covers every slot some offered card fits.
+     */
     public static boolean meets(final List<Card> chosen, final SpellAbility sa, final Iterable<Card> offered) {
-        if (mustFill(sa) && !fills(slots(sa, offered), chosen)) {
-            return false;
+        if (mustFill(sa)) {
+            final List<CardCollection> slots = slots(sa, offered);
+            final boolean filled = distinct(sa)
+                    ? matched(slots, new ArrayList<>(new CardCollection(chosen))) >= matched(slots, fitting(slots, offered))
+                    : fills(slots, chosen);
+            if (!filled) {
+                return false;
+            }
         }
         return meets(chosen, sa);
     }
