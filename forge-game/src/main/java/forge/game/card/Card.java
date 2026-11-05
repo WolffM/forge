@@ -309,6 +309,7 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
     private Player controller;
     private long controllerTimestamp;
     private NavigableMap<Long, Player> tempControllers = Maps.newTreeMap();
+    private final Set<Long> conditionalControl = Sets.newHashSet();
 
     private String originalText = "", text = "";
     private String chosenType = "";
@@ -3736,6 +3737,27 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
     public final void addTempController(final Player player, final long tstamp) {
         tempControllers.put(tstamp, player);
         view.updateController(this);
+    }
+
+    /** The controller this card has under no control effect: the one it was put onto the battlefield under. */
+    public final Player getBaseController() {
+        return controller != null ? controller : owner;
+    }
+
+    /** Every control effect on this card, by timestamp: a static ability's and a resolved effect's alike. */
+    public final java.util.NavigableMap<Long, Player> getTempControllers() {
+        return Collections.unmodifiableNavigableMap(tempControllers);
+    }
+
+    /** The temporary control with this timestamp ends on a condition (ControlGainEffect's LoseControl$). */
+    public final void markConditionalControl(final long tstamp) {
+        conditionalControl.add(tstamp);
+    }
+
+    /** Whether a control effect still on this card ends on a condition: what GameState cannot write. */
+    public final boolean hasConditionalControl() {
+        conditionalControl.retainAll(tempControllers.keySet());
+        return !conditionalControl.isEmpty();
     }
 
     public final void removeTempController(final long tstamp) {
