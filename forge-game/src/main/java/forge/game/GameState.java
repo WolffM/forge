@@ -112,10 +112,12 @@ public class GameState {
 
     /**
      * The managed effect cards this text recreates from its other lines: a commander's from
-     * {@code IsCommander}, the monarch's and the initiative's from their own lines. {@link #unwritten}
-     * names every other one. A kind joins this set only with a round trip that proves it.
+     * {@code IsCommander}, the monarch's and the initiative's from their own lines, speed's from
+     * {@code speed=} ({@code createSpeedEffect}) and radiation's from a player's RAD counters
+     * ({@code Player.setCounters}). {@link #unwritten} names every other one. A kind joins this set
+     * only with a round trip that proves it.
      */
-    private static final Set<String> CARRIED_EFFECTS = Set.of("commander", "monarch", "initiative");
+    private static final Set<String> CARRIED_EFFECTS = Set.of("commander", "monarch", "initiative", "speed", "radiation");
 
     private boolean removeSummoningSickness = false;
 
