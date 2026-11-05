@@ -27,6 +27,8 @@ import forge.game.phase.PhaseType;
 import forge.game.player.Player;
 import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
+import forge.game.trigger.Trigger;
+import forge.game.trigger.TriggerHandler;
 import forge.game.zone.PlayerZone;
 import forge.game.zone.ZoneType;
 import forge.item.PaperCard;
@@ -99,6 +101,8 @@ public class GameState {
 
     private String tChangePlayer = "NONE";
     private boolean restore = false;
+    private boolean deferAdvance = false;
+    private PhaseType pendingAdvance = null;
     private String tChangePhase = "NONE";
 
     private String tAdvancePhase = "NONE";
@@ -112,6 +116,13 @@ public class GameState {
     private String monarchBeginTurn = null;
     private String initiative = null;
     private String dayTime = null;
+
+    /**
+     * The delayed triggers waiting as the text was written, one {@code delayedtrigger=} line each:
+     * {@code <host id>|<activator P<n>>|<delayed, thisturn or P<n> for a player's own turn>|<intrinsic>|
+     * <remembered, comma-joined c<card id>, P<n> or i<number>>|<the trigger's parameters, Base64>}.
+     */
+    private final List<String> delayedTriggers = new ArrayList<>();
 
     /**
      * The managed effect cards this text recreates from its other lines: a commander's from
@@ -155,6 +166,7 @@ public class GameState {
         if (monarchBeginTurn != null) sb.append(TextUtil.concatNoSpace("monarchbeginturn=", monarchBeginTurn, "\n"));
         if (initiative != null) sb.append(TextUtil.concatNoSpace("initiative=", initiative, "\n"));
         if (dayTime != null) sb.append(TextUtil.concatNoSpace("daytime=", dayTime, "\n"));
+        for (String t : delayedTriggers) sb.append(TextUtil.concatNoSpace("delayedtrigger=", t, "\n"));
 
         int playerIndex = 0;
         for (PlayerState p : playerStates) {
@@ -253,6 +265,13 @@ public class GameState {
             }
         }
 
+        // After the marks above are cleared and made: a delayed trigger marks its host and remembered cards too.
+        delayedTriggers.clear();
+        final TriggerHandler th = game.getTriggerHandler();
+        // A this-turn trigger is in both lists (TriggerHandler.registerThisTurnDelayedTrigger): written once, as thisturn.
+        for (Trigger t : th.getDelayedTriggers()) if (!th.getThisTurnDelayedTriggers().contains(t)) addDelayedTrigger(t, "delayed");
+        for (Trigger t : th.getThisTurnDelayedTriggers()) addDelayedTrigger(t, "thisturn");
+        for (Entry<Player, Trigger> e : th.getPlayerDefinedDelayedTriggers().entries()) addDelayedTrigger(e.getValue(), getPlayerString(e.getKey()));
         for (ZoneType zone : ZONES.keySet()) {
             // Init texts to empty, so that restoring will clear the state
             // if the zone had no cards in it (e.g. empty hand).
@@ -269,6 +288,84 @@ public class GameState {
                 int playerIndex = game.getPlayers().indexOf(card.getZone().getPlayer());
                 addCard(zone, playerStates.get(playerIndex).cardTexts, card);
             }
+        }
+    }
+
+    /** One delayed trigger as its {@code delayedtrigger=} line, its host and remembered cards marked to keep their ids; nothing when it cannot be written. */
+    private void addDelayedTrigger(final Trigger t, final String kind) {
+        final String line = delayedTriggerLine(t, kind);
+        if (line == null) return;
+        delayedTriggers.add(line);
+        cardsReferencedByID.add(t.getHostCard());
+        for (Object o : t.getTriggerRemembered()) if (o instanceof Card) cardsReferencedByID.add((Card) o);
+    }
+
+    /**
+     * A delayed trigger as text, or null when it cannot be: its host must be in a zone this text writes,
+     * have a paper card, and hold the SVar the trigger executes; what it remembers must be cards in
+     * those zones, players or numbers.
+     */
+    private static String delayedTriggerLine(final Trigger t, final String kind) {
+        final Card host = t.getHostCard();
+        if (host == null || host.getZone() == null || !ZONES.containsKey(host.getZone().getZoneType())) return null;
+        if (host.isToken() || host.getPaperCard() == null) return null;
+        final String execute = t.getParam("Execute");
+        if (execute != null && !host.hasSVar(execute)) return null;
+        final List<String> remembered = new ArrayList<>();
+        for (Object o : t.getTriggerRemembered()) {
+            if (o instanceof Card c && c.getZone() != null && ZONES.containsKey(c.getZone().getZoneType()) && !c.isToken() && c.getPaperCard() != null) remembered.add("c" + c.getId());
+            else if (o instanceof Player p) remembered.add("P" + p.getGame().getPlayers().indexOf(p));
+            else if (o instanceof Integer i) remembered.add("i" + i);
+            else return null;
+        }
+        final Player activator = t.getSpawningAbility() != null && t.getSpawningAbility().getActivatingPlayer() != null
+                ? t.getSpawningAbility().getActivatingPlayer() : host.getController();
+        final StringBuilder params = new StringBuilder();
+        for (Entry<String, String> e : t.getMapParams().entrySet()) {
+            if (params.length() > 0) params.append(" | ");
+            params.append(e.getKey()).append("$ ").append(e.getValue());
+        }
+        return host.getId() + "|P" + host.getGame().getPlayers().indexOf(activator) + "|" + kind + "|" + t.isIntrinsic() + "|"
+                + String.join(",", remembered) + "|" + Base64.getEncoder().encodeToString(params.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** Register every {@code delayedtrigger=} line again, on the cards this text just made. */
+    private void handleDelayedTriggers(final Game game) {
+        final TriggerHandler th = game.getTriggerHandler();
+        if (restore) {
+            th.clearDelayedTrigger();
+            th.clearThisTurnDelayedTrigger();
+            th.clearPlayerDefinedDelayedTrigger();
+        }
+        for (String line : delayedTriggers) {
+            final String[] f = line.split("\\|", -1);
+            final Card host = idToCard.get(Integer.parseInt(f[0]));
+            if (host == null) {
+                System.err.println("ERROR: no card with id " + f[0] + " to host a delayed trigger");
+                continue;
+            }
+            final Player activator = parsePlayerString(game, f[1]);
+            final String params = new String(Base64.getDecoder().decode(f[5]), java.nio.charset.StandardCharsets.UTF_8);
+            final Trigger t = TriggerHandler.parseTrigger(params, host, Boolean.parseBoolean(f[3]));
+            final SpellAbility spawn = AbilityFactory.getAbility("DB$ DelayedTrigger | " + params, host);
+            spawn.setActivatingPlayer(activator);
+            t.setSpawningAbility(spawn);
+            t.setActiveZone(null);
+            if (!f[4].isEmpty()) {
+                for (String r : f[4].split(",")) {
+                    if (r.startsWith("c")) t.addRemembered(idToCard.get(Integer.parseInt(r.substring(1))));
+                    else if (r.startsWith("P")) t.addRemembered(parsePlayerString(game, r));
+                    else if (r.startsWith("i")) t.addRemembered(Integer.parseInt(r.substring(1)));
+                }
+            }
+            if (t.hasParam("Execute")) {
+                final SpellAbility exec = AbilityFactory.getAbility(host.getSVar(t.getParam("Execute")), host);
+                exec.setActivatingPlayer(activator);
+                t.setOverridingAbility(exec);
+            }
+            if (f[2].equals("thisturn")) th.registerThisTurnDelayedTrigger(t);
+            else if (f[2].equals("delayed")) th.registerDelayedTrigger(t);
+            else th.registerPlayerDefinedDelayedTrigger(parsePlayerString(game, f[2]), t);
         }
     }
 
@@ -306,7 +403,10 @@ public class GameState {
                 }
             }
         }
-        if (game.getTriggerHandler().hasDelayedTriggers()) kinds.add("delayed-trigger");
+        final TriggerHandler th = game.getTriggerHandler();
+        for (Trigger t : th.getDelayedTriggers()) if (!th.getThisTurnDelayedTriggers().contains(t) && delayedTriggerLine(t, "delayed") == null) kinds.add("delayed-trigger");
+        for (Trigger t : th.getThisTurnDelayedTriggers()) if (delayedTriggerLine(t, "thisturn") == null) kinds.add("delayed-trigger");
+        for (Trigger t : th.getPlayerDefinedDelayedTriggers().values()) if (delayedTriggerLine(t, "P0") == null) kinds.add("delayed-trigger");
         return new ArrayList<>(kinds);
     }
 
@@ -590,6 +690,7 @@ public class GameState {
 
     public void parse(Stream<String> lines) {
         playerStates.clear();
+        delayedTriggers.clear();
         lines.forEach(this::parseLine);
     }
 
@@ -641,6 +742,8 @@ public class GameState {
             initiative = categoryValue.trim();
         } else if (categoryName.equals("daytime")) {
             dayTime = categoryValue.trim().toLowerCase();
+        } else if (categoryName.equals("delayedtrigger")) {
+            delayedTriggers.add(categoryValue.trim());
         } else if (categoryName.equals("removesummoningsickness")) {
             removeSummoningSickness = categoryValue.equalsIgnoreCase("true");
         } else if (categoryName.endsWith("life")) {
@@ -687,6 +790,27 @@ public class GameState {
     /** This state is a game's own, taken by {@link #initFromGame}: put it back as it was, running no replacement effect. */
     public void setRestore(final boolean restore) {
         this.restore = restore;
+    }
+
+    /**
+     * Leave {@code activephaseadvance} for {@link #advanceDeferred}: the caller first shows every seat the
+     * game this text made. Advancing inside the apply runs the step's triggers while a networked seat
+     * still holds the old view, and a trigger whose card the seat cannot resolve is asked about with no
+     * card, answered null, and dropped.
+     */
+    public void setDeferAdvance(final boolean defer) {
+        this.deferAdvance = defer;
+    }
+
+    /** The {@code activephaseadvance} an apply under {@link #setDeferAdvance} left, run now on the game thread. */
+    public void advanceDeferred(final Game game) {
+        final PhaseType advance = pendingAdvance;
+        pendingAdvance = null;
+        if (advance == null) return;
+        game.getAction().invoke(() -> {
+            game.getPhaseHandler().devAdvanceToPhase(advance);
+            game.getAction().checkStateEffects(true);
+        });
     }
 
     public void applyToGame(final Game game) {
@@ -744,6 +868,7 @@ public class GameState {
         handleRememberedEntities();
         handleMergedCards();
         handleScriptExecution(game);
+        handleDelayedTriggers(game);
         handlePrecastSpells(game);
         handleMarkedDamage();
 
@@ -765,7 +890,9 @@ public class GameState {
         game.getStack().unfreezeStack();
 
         // Advance to a certain phase, activating all triggered abilities
-        if (advPhase != null) {
+        if (advPhase != null && deferAdvance) {
+            pendingAdvance = advPhase;
+        } else if (advPhase != null) {
             game.getPhaseHandler().devAdvanceToPhase(advPhase);
         }
 
