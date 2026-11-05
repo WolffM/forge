@@ -170,7 +170,7 @@ public class ControlGainEffect extends SpellAbilityEffect {
             }
 
             if (lose != null) {
-                tgtC.markConditionalControl(tStamp);
+                tgtC.markConditionalControl(tStamp, lose, source);
                 final GameCommand loseControl = getLoseControlCommand(tgtC, tStamp, source);
                 if (lose.contains("LeavesPlay") && source != tgtC) { // Only return control if host and target are different cards
                     source.addLeavesPlayCommand(loseControl);
@@ -245,6 +245,22 @@ public class ControlGainEffect extends SpellAbilityEffect {
      *            a {@link forge.game.player.Player} object.
      * @return a {@link forge.GameCommand} object.
      */
+    /**
+     * Put back a control that ends when {@code source} leaves the battlefield, untaps or changes
+     * controller — the {@link #CARRIED_CONDITIONS} — as this effect registered it (GameState's restore).
+     */
+    public static void restoreConditionalControl(final Card c, final long tStamp, final List<String> lose, final Card source) {
+        c.markConditionalControl(tStamp, lose, source);
+        if (!source.getGainControlTargets().contains(c)) source.addGainControlTarget(c);
+        final GameCommand loseControl = getLoseControlCommand(c, tStamp, source);
+        if (lose.contains("LeavesPlay")) source.addLeavesPlayCommand(loseControl);
+        if (lose.contains("Untap")) source.addUntapCommand(loseControl);
+        if (lose.contains("LoseControl")) source.addChangeControllerCommand(loseControl);
+    }
+
+    /** The LoseControl$ kinds whose command watches the effect's own source card, and so can be put back. */
+    public static final java.util.Set<String> CARRIED_CONDITIONS = java.util.Set.of("LeavesPlay", "Untap", "LoseControl");
+
     private static GameCommand getLoseControlCommand(final Card c, final long tStamp, final Card host) {
         final GameCommand loseControl = new GameCommand() {
             private static final long serialVersionUID = 878543373519872418L;

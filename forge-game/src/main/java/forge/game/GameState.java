@@ -85,6 +85,9 @@ public class GameState {
     private final Map<Card, List<String>> cardToNamedCard = new HashMap<>();
     private final Map<Card, String> cardToExiledWithId = new HashMap<>();
     private final Map<Card, Card> cardAttackMap = new HashMap<>();
+    /** Each ControlUntil: as read — the GainedControl: timestamp it follows, its kinds, its source's id — put back once every card exists. */
+    private final Map<Card, List<Object[]>> cardToControlUntil = new HashMap<>();
+    private long lastGainedControl = 0;
 
     private final Map<Card, String> cardToScript = new HashMap<>();
 
@@ -236,6 +239,11 @@ public class GameState {
                     // Remember the IDs of chosen cards
                     cardsReferencedByID.add(i);
                 }
+                for (long ts : card.getTempControllers().keySet()) {
+                    final Card.ControlCondition until = card.getControlCondition(ts);
+                    // Remember the ID of the card a control condition watches
+                    if (until != null) cardsReferencedByID.add(until.source());
+                }
                 if (game.getCombat() != null && game.getCombat().isAttacking(card)) {
                     // Remember the IDs of attacked planeswalkers
                     GameEntity def = game.getCombat().getDefenderByAttacker(card);
@@ -291,7 +299,12 @@ public class GameState {
                 } else if (!c.isToken() && c.getPaperCard() == null) {
                     kinds.add(c.isEmblem() ? "emblem" : "effect");
                 }
-                if (zone == ZoneType.Battlefield && c.hasConditionalControl()) kinds.add("control-condition");
+                if (zone == ZoneType.Battlefield) {
+                    for (long ts : c.getTempControllers().keySet()) {
+                        final Card.ControlCondition until = c.getControlCondition(ts);
+                        if (until != null && !forge.game.ability.effects.ControlGainEffect.CARRIED_CONDITIONS.containsAll(until.kinds())) kinds.add("control-condition");
+                    }
+                }
             }
         }
         if (game.getTriggerHandler().hasDelayedTriggers()) kinds.add("delayed-trigger");
@@ -359,13 +372,19 @@ public class GameState {
             }
             // Control in its layers: the base controller, then each control a resolved effect gave, in
             // timestamp order. A static ability's (an Aura's) is not written: statics give it again.
-            final List<Player> gained = new ArrayList<>();
+            // A control that ends on its source's leaving, untapping or changing hands follows its entry as
+            // ControlUntil:<kinds joined by +>@<source id>.
+            final List<String> gained = new ArrayList<>();
             for (Entry<Long, Player> e : c.getTempControllers().entrySet()) {
-                if (!staticTimestamps.contains(e.getKey())) gained.add(e.getValue());
+                if (staticTimestamps.contains(e.getKey())) continue;
+                String entry = "|GainedControl:" + getPlayerString(e.getValue());
+                final Card.ControlCondition until = c.getControlCondition(e.getKey());
+                if (until != null) entry += "|ControlUntil:" + String.join("+", until.kinds()) + "@" + until.source().getId();
+                gained.add(entry);
             }
             if (c.getBaseController() != c.getController() || !gained.isEmpty()) {
                 newText.append("|BaseController:").append(getPlayerString(c.getBaseController()));
-                for (Player p : gained) newText.append("|GainedControl:").append(getPlayerString(p));
+                for (String entry : gained) newText.append(entry);
             }
             if (c.isTapped()) {
                 newText.append("|Tapped");
@@ -695,6 +714,7 @@ public class GameState {
         cardToMergedCards.clear();
         cardToScript.clear();
         cardAttackMap.clear();
+        cardToControlUntil.clear();
 
         int playerTurn = playerStates.indexOf(getPlayerState(tChangePlayer));
         Player newPlayerTurn = game.getPlayers().get(playerTurn);
@@ -719,6 +739,7 @@ public class GameState {
             game.getReplacementHandler().setSuppressAll(false);
         }
         handleGamePieces(game);
+        handleControlConditions();
         handleCardAttachments();
         handleChosenEntities();
         handleRememberedEntities();
@@ -803,6 +824,20 @@ public class GameState {
         }
         if (dayTime != null || restore) {
             game.setDayTime(dayTime == null ? null : dayTime.equals("night")); // true is night (Game.isNight)
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleControlConditions() {
+        for (Entry<Card, List<Object[]>> e : cardToControlUntil.entrySet()) {
+            for (Object[] until : e.getValue()) {
+                final Card source = idToCard.get((Integer) until[2]);
+                if (source == null) {
+                    System.err.println("ERROR: no card with id " + until[2] + " for " + e.getKey() + "'s control condition");
+                    continue;
+                }
+                forge.game.ability.effects.ControlGainEffect.restoreConditionalControl(e.getKey(), (Long) until[0], (List<String>) until[1], source);
+            }
         }
     }
 
@@ -1513,7 +1548,14 @@ public class GameState {
                     // At timestamp 0, so every control effect outranks it, as it did in the game written.
                     c.setController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), 0);
                 } else if (info.startsWith("GainedControl:")) {
-                    c.addTempController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), c.getGame().getNextTimestamp());
+                    final long ts = c.getGame().getNextTimestamp();
+                    c.addTempController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), ts);
+                    lastGainedControl = ts;
+                } else if (info.startsWith("ControlUntil:")) {
+                    final String until = info.substring(info.indexOf(':') + 1);
+                    final int at = until.lastIndexOf('@');
+                    cardToControlUntil.computeIfAbsent(c, k -> new ArrayList<>()).add(new Object[] {
+                        lastGainedControl, Arrays.asList(until.substring(0, at).split("\\+")), Integer.parseInt(until.substring(at + 1)) });
                 } else if (info.startsWith("Ability:")) {
                     String abString = info.substring(info.indexOf(':') + 1).toLowerCase();
                     c.addSpellAbility(AbilityFactory.getAbility(abilityString.get(abString), c));

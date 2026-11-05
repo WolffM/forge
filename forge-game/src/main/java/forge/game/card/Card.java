@@ -302,7 +302,11 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
     private Player controller;
     private long controllerTimestamp;
     private NavigableMap<Long, Player> tempControllers = Maps.newTreeMap();
-    private final Set<Long> conditionalControl = Sets.newHashSet();
+    /** Each temporary control that ends on a condition, by timestamp: its LoseControl$ kinds and the card they watch. */
+    private final Map<Long, ControlCondition> conditionalControl = Maps.newHashMap();
+
+    /** A control effect's end: ControlGainEffect's LoseControl$ kinds, and the card whose leaving, untapping or changing hands ends it. */
+    public record ControlCondition(List<String> kinds, Card source) {}
 
     private String originalText = "", text = "";
     private String chosenType = "";
@@ -3720,14 +3724,14 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
     }
 
     /** The temporary control with this timestamp ends on a condition (ControlGainEffect's LoseControl$). */
-    public final void markConditionalControl(final long tstamp) {
-        conditionalControl.add(tstamp);
+    public final void markConditionalControl(final long tstamp, final List<String> kinds, final Card source) {
+        conditionalControl.put(tstamp, new ControlCondition(List.copyOf(kinds), source));
     }
 
-    /** Whether a control effect still on this card ends on a condition: what GameState cannot write. */
-    public final boolean hasConditionalControl() {
-        conditionalControl.retainAll(tempControllers.keySet());
-        return !conditionalControl.isEmpty();
+    /** The condition the temporary control with this timestamp ends on, or null when it ends on none. */
+    public final ControlCondition getControlCondition(final long tstamp) {
+        conditionalControl.keySet().retainAll(tempControllers.keySet());
+        return conditionalControl.get(tstamp);
     }
 
     public final void removeTempController(final long tstamp) {
