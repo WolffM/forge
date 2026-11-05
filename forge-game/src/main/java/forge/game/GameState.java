@@ -199,7 +199,8 @@ public class GameState {
         monarch = holder(game.getMonarch(), game.getMonarch() == null ? null : game.getMonarch().getMonarchSet());
         monarchBeginTurn = holder(game.getMonarchBeginTurn(), null);
         initiative = holder(game.getHasInitiative(), game.getHasInitiative() == null ? null : game.getHasInitiative().getInitiativeSet());
-        dayTime = game.getDayTime() == null ? null : game.getDayTime() ? "day" : "night";
+        // Forge's own sense: getDayTime() true is NIGHT (Game.isNight), false is day.
+        dayTime = game.isNeitherDayNorNight() ? null : game.isNight() ? "night" : "day";
 
         // Mark the cards that need their ID remembered for various reasons
         cardsReferencedByID.clear();
@@ -804,7 +805,7 @@ public class GameState {
             }
         }
         if (dayTime != null || restore) {
-            game.setDayTime(dayTime == null ? null : dayTime.equals("day"));
+            game.setDayTime(dayTime == null ? null : dayTime.equals("night")); // true is night (Game.isNight)
         }
     }
 
