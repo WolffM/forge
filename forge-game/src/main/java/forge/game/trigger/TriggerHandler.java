@@ -65,6 +65,13 @@ public class TriggerHandler {
         delayedTriggers.clear();
     }
 
+    /** The delayed triggers that wait for their moment, read-only: what GameState writes. */
+    public final List<Trigger> getDelayedTriggers() { return Collections.unmodifiableList(delayedTriggers); }
+    /** The delayed triggers for this turn only, read-only. */
+    public final List<Trigger> getThisTurnDelayedTriggers() { return Collections.unmodifiableList(thisTurnDelayedTriggers); }
+    /** The delayed triggers that wait for a player's own turn, by player, read-only. */
+    public final ListMultimap<Player, Trigger> getPlayerDefinedDelayedTriggers() { return com.google.common.collect.Multimaps.unmodifiableListMultimap(playerDefinedDelayedTriggers); }
+
     /** Whether any delayed trigger waits: this game's, this turn's, or one a player defined. */
     public final boolean hasDelayedTriggers() {
         return !delayedTriggers.isEmpty() || !thisTurnDelayedTriggers.isEmpty() || !playerDefinedDelayedTriggers.isEmpty();
