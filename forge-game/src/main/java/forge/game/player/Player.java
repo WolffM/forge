@@ -2794,6 +2794,25 @@ public class Player extends GameEntity implements Comparable<Player> {
         toPlayer.speedEffect = mapEffectCard(speedEffect, mapper);
     }
 
+    /**
+     * Which of this player's field-managed effect cards {@code c} is ({@code keyword}, {@code monarch},
+     * {@code initiative}, {@code blessing}, {@code enduring-story}, {@code contraption-sprocket},
+     * {@code radiation}, {@code speed}, {@code commander}), or null when it is none of them.
+     */
+    public String managedEffectName(final Card c) {
+        if (c == null) return null;
+        if (c == keywordEffect) return "keyword";
+        if (c == monarchEffect) return "monarch";
+        if (c == initiativeEffect) return "initiative";
+        if (c == blessingEffect) return "blessing";
+        if (c == enduringStoryEffect) return "enduring-story";
+        if (c == contraptionSprocketEffect) return "contraption-sprocket";
+        if (c == radiationEffect) return "radiation";
+        if (c == speedEffect) return "speed";
+        if (c == commanderEffect) return "commander";
+        return null;
+    }
+
     private static Card mapEffectCard(Card effect, Function<Card, Card> mapper) {
         // An effect card in no zone was not part of the copy; leave the
         // snapshot's field unset so its lazy creation path stays consistent.
@@ -3434,7 +3453,7 @@ public class Player extends GameEntity implements Comparable<Player> {
     }
 
     public String getMonarchSet() {
-        return monarchEffect == null ? monarchEffect.getSetCode() : null;
+        return monarchEffect != null ? monarchEffect.getSetCode() : null;
     }
 
     public void createMonarchEffect(final String set) {
