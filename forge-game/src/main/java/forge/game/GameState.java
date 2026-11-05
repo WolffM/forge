@@ -91,6 +91,8 @@ public class GameState {
     private final Map<String, String> abilityString = new HashMap<>();
 
     private final Set<Card> cardsReferencedByID = new HashSet<>();
+    /** The timestamps of the game's static effects as it is written: a control effect with one of them is a static's. */
+    private final Set<Long> staticTimestamps = new HashSet<>();
     private final Set<Card> cardsWithoutETBTrigs = new HashSet<>();
 
     private String tChangePlayer = "NONE";
@@ -203,6 +205,9 @@ public class GameState {
         // Forge's own sense: getDayTime() true is NIGHT (Game.isNight), false is day.
         dayTime = game.isNeitherDayNorNight() ? null : game.isNight() ? "night" : "day";
 
+        staticTimestamps.clear();
+        for (StaticEffect se : game.getStaticEffects().getEffects()) staticTimestamps.add(se.getTimestamp());
+
         // Mark the cards that need their ID remembered for various reasons
         cardsReferencedByID.clear();
         for (ZoneType zone : ZONES.keySet()) {
@@ -270,7 +275,9 @@ public class GameState {
      * holding any of it does not put that game back. The card kinds are this class's own skips — a
      * {@link DetachedCardEffect}, and a card that is not a token and has no paper card (an emblem, an
      * effect) — with the managed effect cards it does recreate ({@link #CARRIED_EFFECTS}) left out
-     * and the others named ({@code effect:speed}). Empty is the whole game.
+     * and the others named ({@code effect:keyword}). Control is written in its layers; what is not is
+     * a control effect that ends on a condition ({@code control-condition}: "for as long as", "until
+     * it untaps"), whose condition lives in an anonymous command. Empty is the whole game.
      */
     public static List<String> unwritten(final Game game) {
         final Set<String> kinds = new TreeSet<>();
@@ -284,7 +291,7 @@ public class GameState {
                 } else if (!c.isToken() && c.getPaperCard() == null) {
                     kinds.add(c.isEmblem() ? "emblem" : "effect");
                 }
-                if (zone == ZoneType.Battlefield && c.getOwner() != c.getController()) kinds.add("control");
+                if (zone == ZoneType.Battlefield && c.hasConditionalControl()) kinds.add("control-condition");
             }
         }
         if (game.getTriggerHandler().hasDelayedTriggers()) kinds.add("delayed-trigger");
@@ -349,6 +356,16 @@ public class GameState {
         if (zoneType == ZoneType.Battlefield) {
             if (c.getOwner() != c.getController()) {
                 newText.append("|Owner:").append(getPlayerString(c.getOwner()));
+            }
+            // Control in its layers: the base controller, then each control a resolved effect gave, in
+            // timestamp order. A static ability's (an Aura's) is not written: statics give it again.
+            final List<Player> gained = new ArrayList<>();
+            for (Entry<Long, Player> e : c.getTempControllers().entrySet()) {
+                if (!staticTimestamps.contains(e.getKey())) gained.add(e.getValue());
+            }
+            if (c.getBaseController() != c.getController() || !gained.isEmpty()) {
+                newText.append("|BaseController:").append(getPlayerString(c.getBaseController()));
+                for (Player p : gained) newText.append("|GainedControl:").append(getPlayerString(p));
             }
             if (c.isTapped()) {
                 newText.append("|Tapped");
@@ -1492,6 +1509,11 @@ public class GameState {
                     Player controller = c.getController();
                     c.setOwner(parsePlayerString(player.getGame(), owner));
                     c.setController(controller, c.getGame().getNextTimestamp());
+                } else if (info.startsWith("BaseController:")) {
+                    // At timestamp 0, so every control effect outranks it, as it did in the game written.
+                    c.setController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), 0);
+                } else if (info.startsWith("GainedControl:")) {
+                    c.addTempController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), c.getGame().getNextTimestamp());
                 } else if (info.startsWith("Ability:")) {
                     String abString = info.substring(info.indexOf(':') + 1).toLowerCase();
                     c.addSpellAbility(AbilityFactory.getAbility(abilityString.get(abString), c));

@@ -170,6 +170,7 @@ public class ControlGainEffect extends SpellAbilityEffect {
             }
 
             if (lose != null) {
+                tgtC.markConditionalControl(tStamp);
                 final GameCommand loseControl = getLoseControlCommand(tgtC, tStamp, source);
                 if (lose.contains("LeavesPlay") && source != tgtC) { // Only return control if host and target are different cards
                     source.addLeavesPlayCommand(loseControl);
