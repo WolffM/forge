@@ -102,6 +102,21 @@ public class GameState {
 
     private int turn = 1;
 
+    // The game's own pieces that are not cards: who is the monarch (and was, as the turn began), who has
+    // the initiative, and day or night. A holder is written "P<n>", with the set its effect card is
+    // drawn from after a "|"; null is nobody (day/night: neither).
+    private String monarch = null;
+    private String monarchBeginTurn = null;
+    private String initiative = null;
+    private String dayTime = null;
+
+    /**
+     * The managed effect cards this text recreates from its other lines: a commander's from
+     * {@code IsCommander}, the monarch's and the initiative's from their own lines. {@link #unwritten}
+     * names every other one. A kind joins this set only with a round trip that proves it.
+     */
+    private static final Set<String> CARRIED_EFFECTS = Set.of("commander", "monarch", "initiative");
+
     private boolean removeSummoningSickness = false;
 
     // Targeting for precast spells in a game state (mostly used by Puzzle Mode game states)
@@ -131,6 +146,10 @@ public class GameState {
         sb.append(TextUtil.concatNoSpace("turn=", String.valueOf(turn), "\n"));
         sb.append(TextUtil.concatNoSpace("activeplayer=", tChangePlayer, "\n"));
         sb.append(TextUtil.concatNoSpace("activephase=", tChangePhase, "\n"));
+        if (monarch != null) sb.append(TextUtil.concatNoSpace("monarch=", monarch, "\n"));
+        if (monarchBeginTurn != null) sb.append(TextUtil.concatNoSpace("monarchbeginturn=", monarchBeginTurn, "\n"));
+        if (initiative != null) sb.append(TextUtil.concatNoSpace("initiative=", initiative, "\n"));
+        if (dayTime != null) sb.append(TextUtil.concatNoSpace("daytime=", dayTime, "\n"));
 
         int playerIndex = 0;
         for (PlayerState p : playerStates) {
@@ -175,6 +194,10 @@ public class GameState {
         tChangePlayer = "p" + game.getPlayers().indexOf(game.getPhaseHandler().getPlayerTurn());
         tChangePhase = game.getPhaseHandler().getPhase().toString();
         turn = game.getPhaseHandler().getTurn();
+        monarch = holder(game.getMonarch(), game.getMonarch() == null ? null : game.getMonarch().getMonarchSet());
+        monarchBeginTurn = holder(game.getMonarchBeginTurn(), null);
+        initiative = holder(game.getHasInitiative(), game.getHasInitiative() == null ? null : game.getHasInitiative().getInitiativeSet());
+        dayTime = game.getDayTime() == null ? null : game.getDayTime() ? "day" : "night";
 
         // Mark the cards that need their ID remembered for various reasons
         cardsReferencedByID.clear();
@@ -231,6 +254,37 @@ public class GameState {
                 addCard(zone, playerStates.get(playerIndex).cardTexts, card);
             }
         }
+    }
+
+    private String holder(final Player p, final String set) {
+        if (p == null) return null;
+        return set == null ? getPlayerString(p) : getPlayerString(p) + "|" + set;
+    }
+
+    /**
+     * What {@link #initFromGame} cannot write of {@code game}, by kind: a turn-start text of a game
+     * holding any of it does not put that game back. The card kinds are this class's own skips — a
+     * {@link DetachedCardEffect}, and a card that is not a token and has no paper card (an emblem, an
+     * effect) — with the managed effect cards it does recreate ({@link #CARRIED_EFFECTS}) left out
+     * and the others named ({@code effect:speed}). Empty is the whole game.
+     */
+    public static List<String> unwritten(final Game game) {
+        final Set<String> kinds = new TreeSet<>();
+        for (ZoneType zone : ZONES.keySet()) {
+            for (Card c : game.getCardsIncludePhasingIn(zone)) {
+                final String managed = c.getOwner() == null ? null : c.getOwner().managedEffectName(c);
+                if (managed != null) {
+                    if (!CARRIED_EFFECTS.contains(managed)) kinds.add("effect:" + managed);
+                } else if (c instanceof DetachedCardEffect) {
+                    kinds.add("detached-effect");
+                } else if (!c.isToken() && c.getPaperCard() == null) {
+                    kinds.add(c.isEmblem() ? "emblem" : "effect");
+                }
+                if (zone == ZoneType.Battlefield && c.getOwner() != c.getController()) kinds.add("control");
+            }
+        }
+        if (game.getTriggerHandler().hasDelayedTriggers()) kinds.add("delayed-trigger");
+        return new ArrayList<>(kinds);
     }
 
     private String getPlayerString(Player p) {
@@ -563,6 +617,14 @@ public class GameState {
 
         if (categoryName.equals("turn")) {
             turn = Integer.parseInt(categoryValue);
+        } else if (categoryName.equals("monarch")) {
+            monarch = categoryValue.trim();
+        } else if (categoryName.equals("monarchbeginturn")) {
+            monarchBeginTurn = categoryValue.trim();
+        } else if (categoryName.equals("initiative")) {
+            initiative = categoryValue.trim();
+        } else if (categoryName.equals("daytime")) {
+            dayTime = categoryValue.trim().toLowerCase();
         } else if (categoryName.equals("removesummoningsickness")) {
             removeSummoningSickness = categoryValue.equalsIgnoreCase("true");
         } else if (categoryName.endsWith("life")) {
@@ -656,6 +718,7 @@ public class GameState {
         } finally {
             game.getReplacementHandler().setSuppressAll(false);
         }
+        handleGamePieces(game);
         handleCardAttachments();
         handleChosenEntities();
         handleRememberedEntities();
@@ -708,6 +771,49 @@ public class GameState {
                 game.getPlayers().get(i).setLife(life, null);
             }
         }
+    }
+
+    /**
+     * The monarch, the initiative and day/night, as this text says them. A line that is absent leaves
+     * the game's own alone, unless this is a restore ({@link #setRestore}), whose text is the whole
+     * game: there, absent is nobody. Recreated as the game left them, so no "becomes the monarch" or
+     * "takes the initiative" trigger runs (they are suppressed here in any case).
+     */
+    private void handleGamePieces(final Game game) {
+        if (monarch != null || restore) {
+            if (game.getMonarch() != null) game.getMonarch().removeMonarchEffect();
+            game.setMonarch(null);
+            if (monarch != null) {
+                final Player p = holderOf(game, monarch);
+                p.createMonarchEffect(holderSet(monarch));
+                game.setMonarch(p);
+            }
+        }
+        if (monarchBeginTurn != null || restore) {
+            game.setMonarchBeginTurn(monarchBeginTurn == null ? null : holderOf(game, monarchBeginTurn));
+        }
+        if (initiative != null || restore) {
+            if (game.getHasInitiative() != null) game.getHasInitiative().removeInitiativeEffect();
+            game.setHasInitiative(null);
+            if (initiative != null) {
+                final Player p = holderOf(game, initiative);
+                game.setHasInitiative(p);
+                p.createInitiativeEffect(holderSet(initiative));
+            }
+        }
+        if (dayTime != null || restore) {
+            game.setDayTime(dayTime == null ? null : dayTime.equals("day"));
+        }
+    }
+
+    private Player holderOf(final Game game, final String holder) {
+        final int bar = holder.indexOf('|');
+        return parsePlayerString(game, (bar < 0 ? holder : holder.substring(0, bar)).toUpperCase());
+    }
+
+    private static String holderSet(final String holder) {
+        final int bar = holder.indexOf('|');
+        return bar < 0 ? null : holder.substring(bar + 1);
     }
 
     private String processManaPool(ManaPool manaPool) {

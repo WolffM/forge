@@ -65,6 +65,11 @@ public class TriggerHandler {
         delayedTriggers.clear();
     }
 
+    /** Whether any delayed trigger waits: this game's, this turn's, or one a player defined. */
+    public final boolean hasDelayedTriggers() {
+        return !delayedTriggers.isEmpty() || !thisTurnDelayedTriggers.isEmpty() || !playerDefinedDelayedTriggers.isEmpty();
+    }
+
     public final void registerThisTurnDelayedTrigger(final Trigger trig) {
         thisTurnDelayedTriggers.add(trig);
         delayedTriggers.add(trig);
