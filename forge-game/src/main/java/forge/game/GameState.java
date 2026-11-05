@@ -86,9 +86,8 @@ public class GameState {
     private final Map<Card, List<String>> cardToNamedCard = new HashMap<>();
     private final Map<Card, String> cardToExiledWithId = new HashMap<>();
     private final Map<Card, Card> cardAttackMap = new HashMap<>();
-    /** Each ControlUntil: as read — the GainedControl: timestamp it follows, its kinds, its source's id — put back once every card exists. */
-    private final Map<Card, List<Object[]>> cardToControlUntil = new HashMap<>();
-    private long lastGainedControl = 0;
+    /** Each card's BaseController:, GainedControl: and ControlUntil: entries, in written order, put on by handleControlLayers. */
+    private final Map<Card, List<String>> cardToControl = new HashMap<>();
 
     private final Map<Card, String> cardToScript = new HashMap<>();
 
@@ -734,7 +733,7 @@ public class GameState {
         cardToMergedCards.clear();
         cardToScript.clear();
         cardAttackMap.clear();
-        cardToControlUntil.clear();
+        cardToControl.clear();
 
         int playerTurn = playerStates.indexOf(getPlayerState(tChangePlayer));
         Player newPlayerTurn = game.getPlayers().get(playerTurn);
@@ -759,7 +758,7 @@ public class GameState {
             game.getReplacementHandler().setSuppressAll(false);
         }
         handleGamePieces(game);
-        handleControlConditions();
+        handleControlLayers(game);
         handleCardAttachments();
         handleChosenEntities();
         handleRememberedEntities();
@@ -847,17 +846,34 @@ public class GameState {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private void handleControlConditions() {
-        for (Entry<Card, List<Object[]>> e : cardToControlUntil.entrySet()) {
-            for (Object[] until : e.getValue()) {
-                final Card source = idToCard.get((Integer) until[2]);
-                if (source == null) {
-                    System.err.println("ERROR: no card with id " + until[2] + " for " + e.getKey() + "'s control condition");
-                    continue;
+    /**
+     * Each card's control in its layers, once every card is in its zone: the base controller below every
+     * timestamp, so every control effect outranks it as it did in the game written (a static's timestamp
+     * is its host's layer timestamp, 0 on a card this text made), then each control a resolved effect
+     * gave, in order, with the condition that ends it put back on its source.
+     */
+    private void handleControlLayers(final Game game) {
+        for (Entry<Card, List<String>> e : cardToControl.entrySet()) {
+            final Card c = e.getKey();
+            long lastGained = 0;
+            for (String info : e.getValue()) {
+                final String value = info.substring(info.indexOf(':') + 1);
+                if (info.startsWith("BaseController:")) {
+                    c.setController(parsePlayerString(game, value), Long.MIN_VALUE);
+                } else if (info.startsWith("GainedControl:")) {
+                    lastGained = game.getNextTimestamp();
+                    c.addTempController(parsePlayerString(game, value), lastGained);
+                } else {
+                    final int at = value.lastIndexOf('@');
+                    final Card source = idToCard.get(Integer.parseInt(value.substring(at + 1)));
+                    if (source == null) {
+                        System.err.println("ERROR: no card with id " + value.substring(at + 1) + " for " + c + "'s control condition");
+                        continue;
+                    }
+                    forge.game.ability.effects.ControlGainEffect.restoreConditionalControl(c, lastGained, Arrays.asList(value.substring(0, at).split("\\+")), source);
                 }
-                forge.game.ability.effects.ControlGainEffect.restoreConditionalControl(e.getKey(), (Long) until[0], (List<String>) until[1], source);
             }
+            game.getAction().controllerChangeZoneCorrection(c);
         }
     }
 
@@ -1567,18 +1583,11 @@ public class GameState {
                     Player controller = c.getController();
                     c.setOwner(parsePlayerString(player.getGame(), owner));
                     c.setController(controller, c.getGame().getNextTimestamp());
-                } else if (info.startsWith("BaseController:")) {
-                    // At timestamp 0, so every control effect outranks it, as it did in the game written.
-                    c.setController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), 0);
-                } else if (info.startsWith("GainedControl:")) {
-                    final long ts = c.getGame().getNextTimestamp();
-                    c.addTempController(parsePlayerString(player.getGame(), info.substring(info.indexOf(':') + 1)), ts);
-                    lastGainedControl = ts;
-                } else if (info.startsWith("ControlUntil:")) {
-                    final String until = info.substring(info.indexOf(':') + 1);
-                    final int at = until.lastIndexOf('@');
-                    cardToControlUntil.computeIfAbsent(c, k -> new ArrayList<>()).add(new Object[] {
-                        lastGainedControl, Arrays.asList(until.substring(0, at).split("\\+")), Integer.parseInt(until.substring(at + 1)) });
+                } else if (info.startsWith("BaseController:") || info.startsWith("GainedControl:") || info.startsWith("ControlUntil:")) {
+                    // Put on once every player's zones are set (handleControlLayers): a card whose base
+                    // controller is another player moves to that player's battlefield, and a later
+                    // player's setup would clear it from the game.
+                    cardToControl.computeIfAbsent(c, k -> new ArrayList<>()).add(info);
                 } else if (info.startsWith("Ability:")) {
                     String abString = info.substring(info.indexOf(':') + 1).toLowerCase();
                     c.addSpellAbility(AbilityFactory.getAbility(abilityString.get(abString), c));
