@@ -139,6 +139,38 @@ public class Phase implements java.io.Serializable {
     public final void executeUntilEndOfPhase(final Player p) {
         excute(untilEndMap.get(p));
     }
+    /**
+     * Where a command {@code test} picks waits in this phase, each as {@code at}, {@code until},
+     * {@code until:P<n>}, {@code untilend:P<n>} or {@code register:P<n>}, a player by their place in
+     * {@code players}: what a turn-start text writes to put the command back with {@link #putAt}.
+     */
+    public final List<String> placesOf(final java.util.function.Predicate<GameCommand> test, final List<Player> players) {
+        final List<String> places = Lists.newArrayList();
+        if (at.stream().anyMatch(test)) places.add("at");
+        if (until.stream().anyMatch(test)) places.add("until");
+        for (Player p : players) {
+            if (untilMap.get(p).stream().anyMatch(test)) places.add("until:P" + players.indexOf(p));
+            if (untilEndMap.get(p).stream().anyMatch(test)) places.add("untilend:P" + players.indexOf(p));
+            if (registerMap.get(p).stream().anyMatch(test)) places.add("register:P" + players.indexOf(p));
+        }
+        return places;
+    }
+
+    /** Put {@code c} where {@link #placesOf} said one waited. */
+    public final void putAt(final String place, final List<Player> players, final GameCommand c) {
+        final int colon = place.indexOf(':');
+        if (colon < 0) {
+            (place.equals("at") ? at : until).add(c);
+            return;
+        }
+        final Player p = players.get(Integer.parseInt(place.substring(colon + 2)));
+        switch (place.substring(0, colon)) {
+            case "untilend" -> untilEndMap.put(p, c);
+            case "register" -> registerMap.put(p, c);
+            default -> untilMap.put(p, c);
+        }
+    }
+
     protected void excute(Collection<GameCommand> list) {
         List<GameCommand> events = Lists.newArrayList(list);
         events.forEach(GameCommand::run);
