@@ -786,7 +786,9 @@ public class GameState {
             for (Card c : game.getCardsIncludePhasingIn(zone)) {
                 final String managed = c.getOwner() == null ? null : c.getOwner().managedEffectName(c);
                 if (managed != null) {
-                    if (!CARRIED_EFFECTS.contains(managed)) kinds.add("effect:" + managed);
+                    // The keyword card of a player whose keywords are all statics' is made again by those statics.
+                    final boolean byStatics = managed.equals("keyword") && !c.getOwner().hasResolvedKeywords();
+                    if (!CARRIED_EFFECTS.contains(managed) && !byStatics) kinds.add("effect:" + managed);
                 } else if (c instanceof DetachedCardEffect) {
                     kinds.add("detached-effect");
                 } else if (!c.isToken() && c.getPaperCard() == null && effectLine(c) == null) {
