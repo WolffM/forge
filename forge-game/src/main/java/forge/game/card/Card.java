@@ -3574,6 +3574,36 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
         leavePlayCommandList.add(c);
     }
 
+    /**
+     * The card command lists a command {@code test} picks waits in, by name ({@code leavesplay},
+     * {@code untap}, {@code changecontroller}, {@code unattach}, {@code faceup}, {@code facedown},
+     * {@code phaseout}): what a turn-start text writes to put it back with {@link #addCommand}.
+     */
+    public final List<String> commandPlacesOf(final Predicate<GameCommand> test) {
+        final List<String> places = Lists.newArrayList();
+        for (Map.Entry<String, List<GameCommand>> e : commandLists().entrySet()) {
+            if (e.getValue().stream().anyMatch(test)) places.add(e.getKey());
+        }
+        return places;
+    }
+
+    /** Add {@code c} to the command list {@link #commandPlacesOf} named. */
+    public final void addCommand(final String place, final GameCommand c) {
+        commandLists().get(place).add(c);
+    }
+
+    private Map<String, List<GameCommand>> commandLists() {
+        final Map<String, List<GameCommand>> lists = new java.util.LinkedHashMap<>();
+        lists.put("leavesplay", leavePlayCommandList);
+        lists.put("untap", untapCommandList);
+        lists.put("changecontroller", changeControllerCommandList);
+        lists.put("unattach", unattachCommandList);
+        lists.put("faceup", faceupCommandList);
+        lists.put("facedown", facedownCommandList);
+        lists.put("phaseout", phaseOutCommandList);
+        return lists;
+    }
+
     public void addStaticCommandList(Object[] objects) {
         staticCommandList.add(objects);
     }

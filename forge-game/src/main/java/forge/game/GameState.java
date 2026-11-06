@@ -7,6 +7,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 
+import forge.GameCommand;
 import forge.StaticData;
 import forge.card.CardEdition;
 import forge.card.CardStateName;
@@ -15,6 +16,7 @@ import forge.card.MagicColor;
 import forge.card.mana.ManaAtom;
 import forge.game.ability.AbilityFactory;
 import forge.game.ability.ApiType;
+import forge.game.ability.SpellAbilityEffect;
 import forge.game.ability.effects.DetachedCardEffect;
 import forge.game.ability.effects.EffectEffect;
 import forge.game.card.*;
@@ -300,6 +302,9 @@ public class GameState {
             for (Object o : eff.getRemembered()) if (o instanceof Card c) cardsReferencedByID.add(c);
             cardsReferencedByID.addAll(eff.getImprintedCards());
             cardsReferencedByID.addAll(eff.getChosenCards());
+            for (String place : untilPlaces(eff)) {
+                if (place.startsWith("card:")) cardsReferencedByID.add(game.findById(Integer.parseInt(place.split(":")[1])));
+            }
         }
         for (ZoneType zone : ZONES.keySet()) {
             // Init texts to empty, so that restoring will clear the state
@@ -439,17 +444,19 @@ public class GameState {
 
     /**
      * An effect card as its {@code effect=} line, or null when the line would not make it again as it is.
-     * Carried: a card an Effect ability made to last the game (an emblem, a boon, "for the rest of the
-     * game", an adventure), whose host is a written card holding that ability; rebuilt by
-     * {@link EffectEffect#buildEffect} from it. Not carried: an effect with a duration (its end is an
-     * anonymous command), one that changed since it was made (its SVars, counters or text), one its host
-     * imprints, and one remembering what the text cannot name (a spell, a last-known copy).
+     * Carried: a card an Effect ability made, whose host is a written card holding that ability; rebuilt
+     * by {@link EffectEffect#buildEffect} from it. One lasting the game (an emblem, a boon, an adventure)
+     * needs nothing more; one with a duration needs its end found ({@link #untilPlaces}). Not carried:
+     * one that changed since it was made (its SVars, counters or text), one its host imprints, and one
+     * remembering what the text cannot name (a spell, a last-known copy).
      */
     private static String effectLine(final Card eff) {
         if (eff.isToken() || eff.getPaperCard() != null || eff.getGamePieceType() != GamePieceType.EFFECT) return null;
         final SpellAbility sa = eff.getEffectSourceAbility();
-        if (sa == null || sa.getApi() != ApiType.Effect || !"Permanent".equals(sa.getParam("Duration")) || sa.hasParam("ImprintOnHost")) return null;
+        if (sa == null || sa.getApi() != ApiType.Effect || sa.hasParam("ImprintOnHost")) return null;
         final Game game = eff.getGame();
+        final List<String> until = untilPlaces(eff);
+        if (until == null) return null;
         final Card host = game.getCardState(sa.getHostCard(), null);
         if (!writtenWithId(host)) return null;
         final List<SpellAbility> abilities = sourceAbilities(host);
@@ -487,6 +494,7 @@ public class GameState {
         f.append("owner=P").append(game.getPlayers().indexOf(eff.getOwner())).append('\n');
         if (sa.getActivatingPlayer() != null) f.append("activator=P").append(game.getPlayers().indexOf(sa.getActivatingPlayer())).append('\n');
         f.append("name=").append(eff.getName()).append('\n');
+        f.append("until=").append(String.join(",", until)).append('\n');
         if (eff.getImageKey() != null) f.append("image=").append(eff.getImageKey()).append('\n');
         f.append("remembered=").append(String.join(",", remembered)).append('\n');
         f.append("imprinted=").append(String.join(",", imprinted)).append('\n');
@@ -499,6 +507,43 @@ public class GameState {
         f.append("named=").append(String.join(",", named)).append('\n');
         if (eff.hasChosenNumber()) f.append("number=").append(eff.getChosenNumber()).append('\n');
         return base64(f.toString());
+    }
+
+    /** The game's phases whose commands a turn-start text writes, by the name it writes them under. */
+    private static Map<String, forge.game.phase.Phase> phases(final Game game) {
+        final Map<String, forge.game.phase.Phase> phases = new LinkedHashMap<>();
+        phases.put("untap", game.getUntap());
+        phases.put("upkeep", game.getUpkeep());
+        phases.put("beginofcombat", game.getBeginOfCombat());
+        phases.put("endofcombat", game.getEndOfCombat());
+        phases.put("endofturn", game.getEndOfTurn());
+        phases.put("cleanup", game.getCleanup());
+        return phases;
+    }
+
+    /**
+     * Where the command that ends {@code eff} waits: {@code phase:<phase>:<place>} ({@link
+     * forge.game.phase.Phase#placesOf}) and {@code card:<id>:<list>} ({@link Card#commandPlacesOf}),
+     * empty for an effect lasting the game, null when its end cannot be written: it waits somewhere
+     * else (a state-based-action check), on a card the text does not write, or nowhere this finds.
+     */
+    private static List<String> untilPlaces(final Card eff) {
+        final SpellAbility sa = eff.getEffectSourceAbility();
+        final boolean lasting = "Permanent".equals(sa.getParam("Duration"));
+        final Game game = eff.getGame();
+        final java.util.function.Predicate<GameCommand> ends = c -> c instanceof SpellAbilityEffect.ExileEffectCommand x && x.effect() == eff;
+        if (game.sbaCheckedCommandList.stream().anyMatch(ends)) return null;
+        final List<String> places = new ArrayList<>();
+        for (Entry<String, forge.game.phase.Phase> e : phases(game).entrySet()) {
+            for (String place : e.getValue().placesOf(ends, game.getPlayers())) places.add("phase:" + e.getKey() + ":" + place);
+        }
+        for (Card c : game.getCardsInGame()) {
+            final List<String> lists = c.commandPlacesOf(ends);
+            if (lists.isEmpty()) continue;
+            if (!writtenWithId(c)) return null;
+            for (String list : lists) places.add("card:" + c.getId() + ":" + list);
+        }
+        return lasting == places.isEmpty() ? places : null;
     }
 
     private static String base64(final String s) {
@@ -553,6 +598,12 @@ public class GameState {
             for (String n : ids(f.get("named"))) named.add(unbase64(n));
             if (!named.isEmpty()) eff.setNamedCards(named);
             if (f.containsKey("number")) eff.setChosenNumber(Integer.parseInt(f.get("number")));
+            final GameCommand ends = new SpellAbilityEffect.ExileEffectCommand(eff);
+            for (String place : ids(f.get("until"))) {
+                final String[] p = place.split(":", 3);
+                if (p[0].equals("phase")) phases(game).get(p[1]).putAt(p[2], game.getPlayers(), ends);
+                else idToCard.get(Integer.parseInt(p[1])).addCommand(p[2], ends);
+            }
             eff.updateStateForView();
             owner.getZone(ZoneType.Command).add(eff);
             owner.updateZoneForView(owner.getZone(ZoneType.Command));

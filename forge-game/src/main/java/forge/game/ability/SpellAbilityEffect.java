@@ -650,6 +650,17 @@ public abstract class SpellAbilityEffect {
     }
 
     // create a basic template for Effect to be used somewhere els
+    /**
+     * The command that ends an effect card's duration by exiling it: named, so a turn-start text can
+     * find where it waits ({@link forge.game.GameState}) and put one back there for the card it remakes.
+     */
+    public record ExileEffectCommand(Card effect) implements GameCommand {
+        @Override
+        public void run() {
+            effect.getGame().getAction().exileEffect(effect);
+        }
+    }
+
     public static Card createEffect(final SpellAbility sa, final Player controller, final String name, final String image) {
         return createEffect(sa, sa.getHostCard(), controller, name, image, controller.getGame().getNextTimestamp());
     }
