@@ -16,6 +16,7 @@ import forge.card.mana.ManaAtom;
 import forge.game.ability.AbilityFactory;
 import forge.game.ability.ApiType;
 import forge.game.ability.effects.DetachedCardEffect;
+import forge.game.ability.effects.EffectEffect;
 import forge.game.card.*;
 import forge.game.card.token.TokenInfo;
 import forge.game.combat.Combat;
@@ -25,6 +26,8 @@ import forge.game.event.GameEventCombatChanged;
 import forge.game.mana.ManaPool;
 import forge.game.phase.PhaseType;
 import forge.game.player.Player;
+import forge.game.replacement.ReplacementEffect;
+import forge.game.spellability.AbilitySub;
 import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
 import forge.game.trigger.Trigger;
@@ -126,6 +129,16 @@ public class GameState {
     private final List<String> delayedTriggers = new ArrayList<>();
 
     /**
+     * The effect cards and emblems the text puts back, in the order the game made them, one
+     * {@code effect=} line each: Base64 of {@code key=value} lines naming the ability that made it
+     * ({@code host}, a card id; {@code at}, its place in {@link #sourceAbilities}) and what it holds
+     * that the ability does not say again (who it remembers, its choices). See {@link #effectLine}.
+     */
+    private final List<String> effects = new ArrayList<>();
+    /** The effect cards {@link #effects} carries, as the text was written. */
+    private final Set<Card> carriedEffects = new HashSet<>();
+
+    /**
      * The managed effect cards this text recreates from its other lines: a commander's from
      * {@code IsCommander}, the monarch's and the initiative's from their own lines, speed's from
      * {@code speed=} ({@code createSpeedEffect}) and radiation's from a player's RAD counters
@@ -168,6 +181,7 @@ public class GameState {
         if (initiative != null) sb.append(TextUtil.concatNoSpace("initiative=", initiative, "\n"));
         if (dayTime != null) sb.append(TextUtil.concatNoSpace("daytime=", dayTime, "\n"));
         for (String t : delayedTriggers) sb.append(TextUtil.concatNoSpace("delayedtrigger=", t, "\n"));
+        for (String e : effects) sb.append(TextUtil.concatNoSpace("effect=", e, "\n"));
 
         int playerIndex = 0;
         for (PlayerState p : playerStates) {
@@ -271,6 +285,21 @@ public class GameState {
         for (Trigger t : th.getDelayedTriggers()) if (!th.getThisTurnDelayedTriggers().contains(t)) addDelayedTrigger(t, "delayed");
         for (Trigger t : th.getThisTurnDelayedTriggers()) addDelayedTrigger(t, "thisturn");
         for (Entry<Player, Trigger> e : th.getPlayerDefinedDelayedTriggers().entries()) addDelayedTrigger(e.getValue(), getPlayerString(e.getKey()));
+        // The effect cards an ability made, oldest first, so they take their timestamps back in that order.
+        effects.clear();
+        carriedEffects.clear();
+        final List<Card> commanded = new ArrayList<>(game.getCardsIn(ZoneType.Command));
+        commanded.sort(Comparator.comparingLong(Card::getGameTimestamp));
+        for (Card eff : commanded) {
+            final String line = effectLine(eff);
+            if (line == null) continue;
+            effects.add(line);
+            carriedEffects.add(eff);
+            cardsReferencedByID.add(game.getCardState(eff.getEffectSourceAbility().getHostCard()));
+            for (Object o : eff.getRemembered()) if (o instanceof Card c) cardsReferencedByID.add(c);
+            cardsReferencedByID.addAll(eff.getImprintedCards());
+            cardsReferencedByID.addAll(eff.getChosenCards());
+        }
         for (ZoneType zone : ZONES.keySet()) {
             // Init texts to empty, so that restoring will clear the state
             // if the zone had no cards in it (e.g. empty hand).
@@ -368,6 +397,171 @@ public class GameState {
         }
     }
 
+    /** Whether an adventure effect the text does not carry remembers {@code c}: "on an adventure" says it again. */
+    private boolean onUncarriedAdventure(final Card c) {
+        for (Card eff : c.getGame().getCardsIn(ZoneType.Command)) {
+            final SpellAbility sa = eff.getEffectSourceAbility();
+            if (sa != null && sa.hasParam("Adventure") && eff.isRemembered(c) && !carriedEffects.contains(eff)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Every ability {@code host} has that can make an effect card, in an order a card made from the same
+     * text has too: each state's spell abilities, its triggers' and its replacements' abilities, each
+     * with the abilities under it.
+     */
+    private static List<SpellAbility> sourceAbilities(final Card host) {
+        final List<SpellAbility> out = new ArrayList<>();
+        for (CardStateName name : new TreeSet<>(host.getStates())) {
+            final CardState state = host.getState(name);
+            for (SpellAbility sa : state.getSpellAbilities()) addAbilityTree(sa, out);
+            for (Trigger t : state.getTriggers()) addAbilityTree(t.ensureAbility(), out);
+            for (ReplacementEffect re : state.getReplacementEffects()) addAbilityTree(re.getOverridingAbility(), out);
+        }
+        return out;
+    }
+
+    private static void addAbilityTree(final SpellAbility sa, final List<SpellAbility> out) {
+        if (sa == null || out.contains(sa)) return;
+        out.add(sa);
+        addAbilityTree(sa.getSubAbility(), out);
+        for (SpellAbility a : sa.getAdditionalAbilities().values()) addAbilityTree(a, out);
+        for (List<AbilitySub> l : sa.getAdditionalAbilityLists().values()) for (AbilitySub a : l) addAbilityTree(a, out);
+    }
+
+    /** A card the text writes with its id: in a written zone as itself, and a token or a card with a paper card. */
+    private static boolean writtenWithId(final Card c) {
+        return c != null && c.getZone() != null && ZONES.containsKey(c.getZone().getZoneType()) && c.getZone().contains(c)
+                && !(c instanceof DetachedCardEffect) && (c.isToken() || c.getPaperCard() != null);
+    }
+
+    /**
+     * An effect card as its {@code effect=} line, or null when the line would not make it again as it is.
+     * Carried: a card an Effect ability made to last the game (an emblem, a boon, "for the rest of the
+     * game", an adventure), whose host is a written card holding that ability; rebuilt by
+     * {@link EffectEffect#buildEffect} from it. Not carried: an effect with a duration (its end is an
+     * anonymous command), one that changed since it was made (its SVars, counters or text), one its host
+     * imprints, and one remembering what the text cannot name (a spell, a last-known copy).
+     */
+    private static String effectLine(final Card eff) {
+        if (eff.isToken() || eff.getPaperCard() != null || eff.getGamePieceType() != GamePieceType.EFFECT) return null;
+        final SpellAbility sa = eff.getEffectSourceAbility();
+        if (sa == null || sa.getApi() != ApiType.Effect || !"Permanent".equals(sa.getParam("Duration")) || sa.hasParam("ImprintOnHost")) return null;
+        final Game game = eff.getGame();
+        final Card host = game.getCardState(sa.getHostCard(), null);
+        if (!writtenWithId(host)) return null;
+        final List<SpellAbility> abilities = sourceAbilities(host);
+        int at = -1;
+        for (int i = 0; i < abilities.size() && at < 0; i++) {
+            final SpellAbility a = abilities.get(i);
+            if (a.getApi() == ApiType.Effect && a.getMapParams().equals(sa.getMapParams()) && a.getSVars().equals(sa.getSVars())) at = i;
+        }
+        if (at < 0) return null;
+        if (!eff.getSVars().equals(sa.getSVars()) || !eff.getCounters().isEmpty()
+                || !eff.getChangedTextColorWords().isEmpty() || !eff.getChangedTextTypeWords().isEmpty()) return null;
+        final List<String> remembered = new ArrayList<>();
+        for (Object o : eff.getRemembered()) {
+            if (o instanceof Card c && writtenWithId(c)) remembered.add("c" + c.getId());
+            else if (o instanceof Player p) remembered.add("P" + game.getPlayers().indexOf(p));
+            else if (o instanceof Integer i) remembered.add("i" + i);
+            else if (o instanceof String str) remembered.add("s" + base64(str));
+            else return null;
+        }
+        final List<String> imprinted = new ArrayList<>();
+        for (Card c : eff.getImprintedCards()) {
+            if (!writtenWithId(c)) return null;
+            imprinted.add(String.valueOf(c.getId()));
+        }
+        final List<String> chosenCards = new ArrayList<>();
+        for (Card c : eff.getChosenCards()) {
+            if (!writtenWithId(c)) return null;
+            chosenCards.add(String.valueOf(c.getId()));
+        }
+        final List<String> named = new ArrayList<>();
+        for (String n : eff.getNamedCards()) named.add(base64(n));
+        final StringBuilder f = new StringBuilder();
+        f.append("host=").append(host.getId()).append('\n');
+        f.append("at=").append(at).append('\n');
+        f.append("owner=P").append(game.getPlayers().indexOf(eff.getOwner())).append('\n');
+        if (sa.getActivatingPlayer() != null) f.append("activator=P").append(game.getPlayers().indexOf(sa.getActivatingPlayer())).append('\n');
+        f.append("name=").append(eff.getName()).append('\n');
+        if (eff.getImageKey() != null) f.append("image=").append(eff.getImageKey()).append('\n');
+        f.append("remembered=").append(String.join(",", remembered)).append('\n');
+        f.append("imprinted=").append(String.join(",", imprinted)).append('\n');
+        if (eff.hasChosenColor()) f.append("colors=").append(String.join(",", eff.getChosenColors())).append('\n');
+        f.append("chosencards=").append(String.join(",", chosenCards)).append('\n');
+        if (eff.hasChosenPlayer()) f.append("chosenplayer=P").append(game.getPlayers().indexOf(eff.getChosenPlayer())).append('\n');
+        if (eff.getChosenDirection() != null) f.append("direction=").append(eff.getChosenDirection().name()).append('\n');
+        if (eff.hasChosenType()) f.append("type=").append(eff.getChosenType()).append('\n');
+        if (eff.hasChosenType2()) f.append("type2=").append(eff.getChosenType2()).append('\n');
+        f.append("named=").append(String.join(",", named)).append('\n');
+        if (eff.hasChosenNumber()) f.append("number=").append(eff.getChosenNumber()).append('\n');
+        return base64(f.toString());
+    }
+
+    private static String base64(final String s) {
+        return Base64.getEncoder().encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String unbase64(final String s) {
+        return new String(Base64.getDecoder().decode(s), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** Make every {@code effect=} line's card again, from its ability on the card this text just made, and put it in its owner's command zone. */
+    private void handleEffects(final Game game) {
+        for (String line : effects) {
+            final Map<String, String> f = new HashMap<>();
+            for (String kv : unbase64(line).split("\n")) {
+                final int eq = kv.indexOf('=');
+                if (eq > 0) f.put(kv.substring(0, eq), kv.substring(eq + 1));
+            }
+            final Card host = idToCard.get(Integer.parseInt(f.get("host")));
+            final List<SpellAbility> abilities = host == null ? List.of() : sourceAbilities(host);
+            final int at = Integer.parseInt(f.get("at"));
+            if (at >= abilities.size()) {
+                System.err.println("ERROR: no ability " + at + " on card " + f.get("host") + " to make " + f.get("name"));
+                continue;
+            }
+            final SpellAbility sa = abilities.get(at);
+            if (f.containsKey("activator")) sa.setActivatingPlayer(parsePlayerString(game, f.get("activator")));
+            final Player owner = parsePlayerString(game, f.get("owner"));
+            final boolean remembers = sa.hasParam("RememberSpell") || sa.hasParam("RememberObjects") || sa.hasParam("RememberLKI");
+            final CardCollection imprinted = new CardCollection();
+            for (String id : ids(f.get("imprinted"))) imprinted.add(idToCard.get(Integer.parseInt(id)));
+            final Card eff = EffectEffect.buildEffect(sa, owner, f.get("name"), f.get("image"),
+                    remembers ? new forge.util.collect.FCollection<>() : null, imprinted.isEmpty() ? null : imprinted, true);
+            for (String r : ids(f.get("remembered"))) {
+                final String v = r.substring(1);
+                switch (r.charAt(0)) {
+                    case 'c' -> eff.addRemembered(idToCard.get(Integer.parseInt(v)));
+                    case 'P' -> eff.addRemembered(parsePlayerString(game, r));
+                    case 'i' -> eff.addRemembered(Integer.parseInt(v));
+                    default -> eff.addRemembered(unbase64(v));
+                }
+            }
+            if (f.containsKey("colors")) eff.setChosenColors(Arrays.asList(f.get("colors").split(",")));
+            final CardCollection chosen = new CardCollection();
+            for (String id : ids(f.get("chosencards"))) chosen.add(idToCard.get(Integer.parseInt(id)));
+            if (!chosen.isEmpty()) eff.setChosenCards(chosen);
+            if (f.containsKey("chosenplayer")) eff.setChosenPlayer(parsePlayerString(game, f.get("chosenplayer")));
+            if (f.containsKey("direction")) eff.setChosenDirection(Direction.valueOf(f.get("direction")));
+            if (f.containsKey("type")) eff.setChosenType(f.get("type"));
+            if (f.containsKey("type2")) eff.setChosenType2(f.get("type2"));
+            final List<String> named = new ArrayList<>();
+            for (String n : ids(f.get("named"))) named.add(unbase64(n));
+            if (!named.isEmpty()) eff.setNamedCards(named);
+            if (f.containsKey("number")) eff.setChosenNumber(Integer.parseInt(f.get("number")));
+            eff.updateStateForView();
+            owner.getZone(ZoneType.Command).add(eff);
+            owner.updateZoneForView(owner.getZone(ZoneType.Command));
+        }
+    }
+
+    private static List<String> ids(final String joined) {
+        return joined == null || joined.isEmpty() ? List.of() : Arrays.asList(joined.split(","));
+    }
+
     private String holder(final Player p, final String set) {
         if (p == null) return null;
         return set == null ? getPlayerString(p) : getPlayerString(p) + "|" + set;
@@ -391,7 +585,7 @@ public class GameState {
                     if (!CARRIED_EFFECTS.contains(managed)) kinds.add("effect:" + managed);
                 } else if (c instanceof DetachedCardEffect) {
                     kinds.add("detached-effect");
-                } else if (!c.isToken() && c.getPaperCard() == null) {
+                } else if (!c.isToken() && c.getPaperCard() == null && effectLine(c) == null) {
                     kinds.add(c.isEmblem() ? "emblem" : "effect");
                 }
                 if (zone == ZoneType.Battlefield) {
@@ -630,9 +824,7 @@ public class GameState {
             if (c.isFaceDown()) {
                 newText.append("|FaceDown"); // Exiled face down
             }
-            if (c.isAdventureCard() && c.getZone().is(ZoneType.Exile)) {
-                // TODO: this will basically default all exiled cards with Adventure to being "On Adventure".
-                // Need to figure out a better way to detect if it's actually on adventure.
+            if (c.isAdventureCard() && c.getZone().is(ZoneType.Exile) && onUncarriedAdventure(c)) {
                 newText.append("|OnAdventure");
             }
             if (c.isForetold()) {
@@ -713,6 +905,7 @@ public class GameState {
     public void parse(Stream<String> lines) {
         playerStates.clear();
         delayedTriggers.clear();
+        effects.clear();
         lines.forEach(this::parseLine);
     }
 
@@ -766,6 +959,8 @@ public class GameState {
             dayTime = categoryValue.trim().toLowerCase();
         } else if (categoryName.equals("delayedtrigger")) {
             delayedTriggers.add(categoryValue.trim());
+        } else if (categoryName.equals("effect")) {
+            effects.add(categoryValue.trim());
         } else if (categoryName.equals("removesummoningsickness")) {
             removeSummoningSickness = categoryValue.equalsIgnoreCase("true");
         } else if (categoryName.endsWith("life")) {
@@ -882,6 +1077,7 @@ public class GameState {
             game.getReplacementHandler().setSuppressAll(false);
         }
         handleGamePieces(game);
+        handleEffects(game);
         handleControlLayers(game);
         handleCardAttachments();
         handleChosenEntities();

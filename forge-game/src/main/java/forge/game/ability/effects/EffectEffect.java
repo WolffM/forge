@@ -44,10 +44,6 @@ public class EffectEffect extends SpellAbilityEffect {
         final Card hostCard = sa.getHostCard();
         final Game game = hostCard.getGame();
 
-        String[] effectAbilities = null;
-        String[] effectTriggers = null;
-        String[] effectStaticAbilities = null;
-        String[] effectReplacementEffects = null;
         FCollection<GameObject> rememberList = null;
         String effectImprinted = null;
         String noteCounterDefined = null;
@@ -55,22 +51,6 @@ public class EffectEffect extends SpellAbilityEffect {
 
         if (!checkValidDuration(duration, sa)) {
             return;
-        }
-
-        if (sa.hasParam("Abilities")) {
-            effectAbilities = sa.getParam("Abilities").split(",");
-        }
-
-        if (sa.hasParam("Triggers")) {
-            effectTriggers = sa.getParam("Triggers").split(",");
-        }
-
-        if (sa.hasParam("StaticAbilities")) {
-            effectStaticAbilities = sa.getParam("StaticAbilities").split(",");
-        }
-
-        if (sa.hasParam("ReplacementEffects")) {
-            effectReplacementEffects = sa.getParam("ReplacementEffects").split(",");
         }
 
         if (sa.hasParam("RememberSpell")) {
@@ -171,100 +151,8 @@ public class EffectEffect extends SpellAbilityEffect {
         params.put(AbilityKey.LastStateGraveyard, sa.getLastStateGraveyard());
 
         for (Player controller : effectOwner) {
-            final Card eff = createEffect(sa, controller, name, image);
-            if (sa.hasParam("Boon")) {
-                eff.setBoon(true);
-            }
-
-            // Abilities and triggers work the same as they do for Token
-            // Grant abilities
-            if (effectAbilities != null) {
-                for (final String s : effectAbilities) {
-                    final SpellAbility grantedAbility = AbilityFactory.getAbility(eff, s, sa);
-                    eff.addSpellAbility(grantedAbility);
-                    grantedAbility.setIntrinsic(true);
-                }
-            }
-
-            // Grant triggers
-            if (effectTriggers != null) {
-                for (final String s : effectTriggers) {
-                    final Trigger parsedTrigger = TriggerHandler.parseTrigger(AbilityUtils.getSVar(sa, s), eff, true, sa);
-                    parsedTrigger.setActiveZone(EnumSet.of(ZoneType.Command));
-                    parsedTrigger.setIntrinsic(true);
-                    eff.addTrigger(parsedTrigger);
-                }
-            }
-
-            // Grant static abilities
-            if (effectStaticAbilities != null) {
-                for (final String s : effectStaticAbilities) {
-                    final StaticAbility addedStaticAbility = eff.addStaticAbility(AbilityUtils.getSVar(sa, s));
-                    if (addedStaticAbility != null) { //prevent npe casting adventure card spell
-                        addedStaticAbility.setActiveZone(EnumSet.of(ZoneType.Command));
-                        addedStaticAbility.setIntrinsic(true);
-                    }
-                }
-            }
-
-            // Grant replacement effects
-            if (effectReplacementEffects != null) {
-                for (final String s : effectReplacementEffects) {
-                    final String actualReplacement = AbilityUtils.getSVar(sa, s);
-
-                    final ReplacementEffect parsedReplacement = ReplacementHandler.parseReplacement(actualReplacement, eff, true, eff.getCurrentState());
-                    parsedReplacement.setActiveZone(EnumSet.of(ZoneType.Command));
-                    parsedReplacement.setIntrinsic(true);
-                    eff.addReplacementEffect(parsedReplacement);
-                }
-            }
-
-            // Remember Keywords
-            if (sa.hasParam("RememberKeywords")) {
-                List<String> effectKeywords = Arrays.asList(sa.getParam("RememberKeywords").split(","));
-                if (sa.hasParam("SharedKeywordsZone")) {
-                    List<ZoneType> zones = ZoneType.listValueOf(sa.getParam("SharedKeywordsZone"));
-                    String[] restrictions = sa.hasParam("SharedRestrictions") ? sa.getParam("SharedRestrictions").split(",")
-                            : new String[]{"Card"};
-                    effectKeywords = CardFactoryUtil.sharedKeywords(effectKeywords, restrictions, zones, hostCard, sa);
-                }
-                if (effectKeywords != null) {
-                    eff.addRemembered(effectKeywords);
-                }
-            }
-
-            // Set Remembered
-            if (rememberList != null) {
-                eff.addRemembered(rememberList);
-                if (sa.hasParam("ForgetOnMoved")) {
-                    addForgetOnMovedTrigger(eff, sa.getParam("ForgetOnMoved"));
-                    if (!"Stack".equals(sa.getParam("ForgetOnMoved")) && !"False".equalsIgnoreCase(sa.getParam("ForgetOnCast"))) {
-                        addForgetOnCastTrigger(eff, "Card.IsRemembered");
-                    }
-                } else if (sa.hasParam("ExileOnMoved")) {
-                    addExileOnMovedTrigger(eff, sa.getParam("ExileOnMoved"));
-                }
-                if (sa.hasParam("ForgetOnPhasedIn")) {
-                    addForgetOnPhasedInTrigger(eff);
-                }
-                if (sa.hasParam("ForgetCounter")) {
-                    addForgetCounterTrigger(eff, sa.getParam("ForgetCounter"));
-                }
-            } else if (sa.hasParam("ForgetOnCast")) {
-                addForgetOnCastTrigger(eff, sa.getParam("ForgetOnCast"));
-            }
-
-            if (sa.hasParam("ExileOnLost")) {
-                addExileOnLostTrigger(eff);
-            }
-
-            if (sa.hasParam("ExileOnCounter")) {
-                addExileCounterTrigger(eff, sa.getParam("ExileOnCounter"));
-            }
-
-            if (effectImprinted != null) {
-                eff.addImprintedCards(AbilityUtils.getDefinedCards(hostCard, effectImprinted, sa));
-            }
+            final Card eff = buildEffect(sa, controller, name, image, rememberList,
+                    effectImprinted == null ? null : AbilityUtils.getDefinedCards(hostCard, effectImprinted, sa), false);
 
             // Note counters on defined
             if (noteCounterDefined != null) {
@@ -273,6 +161,132 @@ public class EffectEffect extends SpellAbilityEffect {
                 }
             }
 
+            if (sa.hasParam("AtEOT")) {
+                registerDelayedTrigger(sa, sa.getParam("AtEOT"), Lists.newArrayList(hostCard));
+            }
+
+            if (duration == null || !duration.equals("Permanent")) {
+                addUntilCommand(sa, () -> game.getAction().exileEffect(eff), controller);
+            }
+
+            if (sa.hasParam("ImprintOnHost")) {
+                hostCard.addImprintedCard(eff);
+            }
+
+            game.getAction().moveToCommand(eff, sa);
+        }
+    }
+
+
+    /**
+     * The effect card {@code sa} makes for {@code controller}, not yet in a zone and with no duration
+     * on it. {@code restoring} is a turn-start text putting a written effect back
+     * ({@link forge.game.GameState}): the keywords it remembers and the choices it copies from its
+     * host come from that text instead, so neither is read from the game here.
+     */
+    public static Card buildEffect(final SpellAbility sa, final Player controller, final String name, final String image,
+            final FCollection<GameObject> rememberList, final CardCollectionView imprinted, final boolean restoring) {
+        final Card hostCard = sa.getHostCard();
+        final String[] effectAbilities = sa.hasParam("Abilities") ? sa.getParam("Abilities").split(",") : null;
+        final String[] effectTriggers = sa.hasParam("Triggers") ? sa.getParam("Triggers").split(",") : null;
+        final String[] effectStaticAbilities = sa.hasParam("StaticAbilities") ? sa.getParam("StaticAbilities").split(",") : null;
+        final String[] effectReplacementEffects = sa.hasParam("ReplacementEffects") ? sa.getParam("ReplacementEffects").split(",") : null;
+        final Card eff = createEffect(sa, controller, name, image);
+        if (sa.hasParam("Boon")) {
+            eff.setBoon(true);
+        }
+
+        // Abilities and triggers work the same as they do for Token
+        // Grant abilities
+        if (effectAbilities != null) {
+            for (final String s : effectAbilities) {
+                final SpellAbility grantedAbility = AbilityFactory.getAbility(eff, s, sa);
+                eff.addSpellAbility(grantedAbility);
+                grantedAbility.setIntrinsic(true);
+            }
+        }
+
+        // Grant triggers
+        if (effectTriggers != null) {
+            for (final String s : effectTriggers) {
+                final Trigger parsedTrigger = TriggerHandler.parseTrigger(AbilityUtils.getSVar(sa, s), eff, true, sa);
+                parsedTrigger.setActiveZone(EnumSet.of(ZoneType.Command));
+                parsedTrigger.setIntrinsic(true);
+                eff.addTrigger(parsedTrigger);
+            }
+        }
+
+        // Grant static abilities
+        if (effectStaticAbilities != null) {
+            for (final String s : effectStaticAbilities) {
+                final StaticAbility addedStaticAbility = eff.addStaticAbility(AbilityUtils.getSVar(sa, s));
+                if (addedStaticAbility != null) { //prevent npe casting adventure card spell
+                    addedStaticAbility.setActiveZone(EnumSet.of(ZoneType.Command));
+                    addedStaticAbility.setIntrinsic(true);
+                }
+            }
+        }
+
+        // Grant replacement effects
+        if (effectReplacementEffects != null) {
+            for (final String s : effectReplacementEffects) {
+                final String actualReplacement = AbilityUtils.getSVar(sa, s);
+
+                final ReplacementEffect parsedReplacement = ReplacementHandler.parseReplacement(actualReplacement, eff, true, eff.getCurrentState());
+                parsedReplacement.setActiveZone(EnumSet.of(ZoneType.Command));
+                parsedReplacement.setIntrinsic(true);
+                eff.addReplacementEffect(parsedReplacement);
+            }
+        }
+
+        // Remember Keywords
+        if (!restoring && sa.hasParam("RememberKeywords")) {
+            List<String> effectKeywords = Arrays.asList(sa.getParam("RememberKeywords").split(","));
+            if (sa.hasParam("SharedKeywordsZone")) {
+                List<ZoneType> zones = ZoneType.listValueOf(sa.getParam("SharedKeywordsZone"));
+                String[] restrictions = sa.hasParam("SharedRestrictions") ? sa.getParam("SharedRestrictions").split(",")
+                        : new String[]{"Card"};
+                effectKeywords = CardFactoryUtil.sharedKeywords(effectKeywords, restrictions, zones, hostCard, sa);
+            }
+            if (effectKeywords != null) {
+                eff.addRemembered(effectKeywords);
+            }
+        }
+
+        // Set Remembered
+        if (rememberList != null) {
+            eff.addRemembered(rememberList);
+            if (sa.hasParam("ForgetOnMoved")) {
+                addForgetOnMovedTrigger(eff, sa.getParam("ForgetOnMoved"));
+                if (!"Stack".equals(sa.getParam("ForgetOnMoved")) && !"False".equalsIgnoreCase(sa.getParam("ForgetOnCast"))) {
+                    addForgetOnCastTrigger(eff, "Card.IsRemembered");
+                }
+            } else if (sa.hasParam("ExileOnMoved")) {
+                addExileOnMovedTrigger(eff, sa.getParam("ExileOnMoved"));
+            }
+            if (sa.hasParam("ForgetOnPhasedIn")) {
+                addForgetOnPhasedInTrigger(eff);
+            }
+            if (sa.hasParam("ForgetCounter")) {
+                addForgetCounterTrigger(eff, sa.getParam("ForgetCounter"));
+            }
+        } else if (sa.hasParam("ForgetOnCast")) {
+            addForgetOnCastTrigger(eff, sa.getParam("ForgetOnCast"));
+        }
+
+        if (sa.hasParam("ExileOnLost")) {
+            addExileOnLostTrigger(eff);
+        }
+
+        if (sa.hasParam("ExileOnCounter")) {
+            addExileCounterTrigger(eff, sa.getParam("ExileOnCounter"));
+        }
+
+        if (imprinted != null) {
+            eff.addImprintedCards(imprinted);
+        }
+
+        if (!restoring) {
             if (hostCard.hasChosenColor()) {
                 eff.setChosenColors(Lists.newArrayList(hostCard.getChosenColors()));
             }
@@ -305,26 +319,14 @@ public class EffectEffect extends SpellAbilityEffect {
             } else if (hostCard.hasChosenNumber()) {
                 eff.setChosenNumber(hostCard.getChosenNumber());
             }
-
-            // Copy text changes
-            if (sa.isIntrinsic()) {
-                eff.copyChangedTextFrom(hostCard);
-            }
-
-            if (sa.hasParam("AtEOT")) {
-                registerDelayedTrigger(sa, sa.getParam("AtEOT"), Lists.newArrayList(hostCard));
-            }
-
-            if (duration == null || !duration.equals("Permanent")) {
-                addUntilCommand(sa, () -> game.getAction().exileEffect(eff), controller);
-            }
-
-            if (sa.hasParam("ImprintOnHost")) {
-                hostCard.addImprintedCard(eff);
-            }
-
-            game.getAction().moveToCommand(eff, sa);
         }
+
+        // Copy text changes
+        if (sa.isIntrinsic()) {
+            eff.copyChangedTextFrom(hostCard);
+        }
+
+        return eff;
     }
 
 }
