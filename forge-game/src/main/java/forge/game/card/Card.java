@@ -3617,6 +3617,14 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
         return places;
     }
 
+    /** Every command waiting on this card: its command lists' and its static command checks'. */
+    public final List<GameCommand> commands() {
+        final List<GameCommand> all = Lists.newArrayList();
+        for (List<GameCommand> list : commandLists().values()) all.addAll(list);
+        for (Object[] check : staticCommandList) all.add((GameCommand) check[3]);
+        return all;
+    }
+
     /** Add {@code c} to the command list {@link #commandPlacesOf} named. */
     public final void addCommand(final String place, final GameCommand c) {
         commandLists().get(place).add(c);

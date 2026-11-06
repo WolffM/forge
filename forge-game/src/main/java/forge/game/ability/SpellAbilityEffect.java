@@ -672,6 +672,100 @@ public abstract class SpellAbilityEffect {
         }
     }
 
+    /**
+     * A duration's end as {@link #addUntilCommand} registers it, in every place it waits: the command it
+     * runs, the ability that made it (its {@code ApiType}, for a turn-start text's report) and how many
+     * times it ran. A command registered in two places (until end of turn or until its host leaves) runs
+     * from both as before; once it has run from one, the copy left in the other is spent, and the text
+     * does not count it as something it loses ({@link forge.game.GameState#unwritten}).
+     */
+    public static final class UntilCommand implements GameCommand {
+        private static final long serialVersionUID = 1L;
+        private final GameCommand command;
+        private final String origin;
+        private int runs;
+
+        UntilCommand(final GameCommand command, final String origin) {
+            this.command = command;
+            this.origin = origin;
+        }
+
+        public GameCommand command() { return command; }
+        public String origin() { return origin; }
+        public boolean spent() { return runs > 0; }
+
+        @Override
+        public void run() {
+            runs++;
+            command.run();
+        }
+    }
+
+    /**
+     * The return of cards an ability moved "until" its duration ends (Banisher Priest's "until it leaves
+     * the battlefield"): those in {@code moved} (from its row's zone to its column's) still on the host's
+     * until-leaves list go back. Named, so a turn-start text can write it and put it back
+     * ({@link forge.game.GameState}); {@code lki} is the host as it was, for a {@code ReturnAbility}.
+     */
+    public record ReturnCommand(SpellAbility sa, Card hostCard, CardZoneTable moved, Card lki) implements GameCommand {
+        @Override
+        public void run() {
+            final Game game = hostCard.getGame();
+            final TriggerHandler trigHandler = game.getTriggerHandler();
+            CardCollectionView untilCards = hostCard.getUntilLeavesBattlefield();
+            // if the list is empty, then the table doesn't need to be checked anymore
+            if (untilCards.isEmpty()) {
+                return;
+            }
+            Map<AbilityKey, Object> moveParams = AbilityKey.newMap();
+            moveParams.put(AbilityKey.LastStateBattlefield, game.copyLastStateBattlefield());
+            moveParams.put(AbilityKey.LastStateGraveyard, game.copyLastStateGraveyard());
+            for (Table.Cell<ZoneType, ZoneType, CardCollection> cell : moved.cellSet()) {
+                for (Card c : cell.getValue()) {
+                    // check if card is still in the until host leaves play list
+                    if (!untilCards.contains(c)) {
+                        continue;
+                    }
+                    // better check if card didn't changed zones again?
+                    Card newCard = game.getCardState(c, null);
+                    if (newCard == null || !newCard.equalsWithGameTimestamp(c)) {
+                        continue;
+                    }
+                    if (sa.hasAdditionalAbility("ReturnAbility")) {
+                        String valid = sa.getParamOrDefault("ReturnValid", "Card.IsTriggerRemembered");
+
+                        String trigSA = "Mode$ ChangesZone | Origin$ " + cell.getColumnKey() + " | Destination$ " + cell.getRowKey() + " | ValidCard$ " + valid +
+                                " | TriggerDescription$ " + sa.getAdditionalAbility("ReturnAbility").getParam("SpellDescription");
+
+                        Trigger trig = TriggerHandler.parseTrigger(trigSA, hostCard, sa.isIntrinsic(), null);
+                        trig.setSpawningAbility(sa.copy(lki, true));
+                        trig.setActiveZone(null);
+                        trig.addRemembered(newCard);
+
+                        SpellAbility overridingSA = sa.getAdditionalAbility("ReturnAbility").copy(hostCard, sa.getActivatingPlayer(), false);
+                        // need to reset the parent, additionalAbility does set it to this
+                        if (overridingSA instanceof AbilitySub) {
+                            ((AbilitySub)overridingSA).setParent(null);
+                        }
+
+                        trig.setOverridingAbility(overridingSA);
+
+                        // Delayed Trigger should only happen once, no need for cleanup?
+                        trigHandler.registerThisTurnDelayedTrigger(trig);
+                    }
+                    // no cause there?
+                    Card movedCard = game.getAction().moveTo(cell.getRowKey(), newCard, 0, null, moveParams);
+                    game.getUntilHostLeavesPlayTriggerList().put(cell.getColumnKey(), cell.getRowKey(), movedCard);
+                }
+            }
+        }
+    }
+
+    /** A duration's end as {@link #addUntilCommand} wraps it, for a turn-start text putting one back. */
+    public static GameCommand untilCommand(final GameCommand command, final String origin) {
+        return new UntilCommand(command, origin);
+    }
+
     public static Card createEffect(final SpellAbility sa, final Player controller, final String name, final String image) {
         return createEffect(sa, sa.getHostCard(), controller, name, image, controller.getGame().getNextTimestamp());
     }
@@ -858,10 +952,8 @@ public abstract class SpellAbilityEffect {
         }
 
         final Card hostCard = sa.getHostCard();
-        final Game game = hostCard.getGame();
         // tokens cease to exist once exiled and never return, and nothing ever cleans them from this list
         hostCard.addUntilLeavesBattlefield(CardLists.filter(triggerList.allCards(), CardPredicates.NON_TOKEN));
-        final TriggerHandler trigHandler = game.getTriggerHandler();
 
         final Card lki;
         if (sa.hasParam("ReturnAbility")) {
@@ -872,61 +964,7 @@ public abstract class SpellAbilityEffect {
             lki = null;
         }
 
-        GameCommand gc = new GameCommand() {
-
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            public void run() {
-                CardCollectionView untilCards = hostCard.getUntilLeavesBattlefield();
-                // if the list is empty, then the table doesn't need to be checked anymore
-                if (untilCards.isEmpty()) {
-                    return;
-                }
-                Map<AbilityKey, Object> moveParams = AbilityKey.newMap();
-                moveParams.put(AbilityKey.LastStateBattlefield, game.copyLastStateBattlefield());
-                moveParams.put(AbilityKey.LastStateGraveyard, game.copyLastStateGraveyard());
-                for (Table.Cell<ZoneType, ZoneType, CardCollection> cell : triggerList.cellSet()) {
-                    for (Card c : cell.getValue()) {
-                        // check if card is still in the until host leaves play list
-                        if (!untilCards.contains(c)) {
-                            continue;
-                        }
-                        // better check if card didn't changed zones again?
-                        Card newCard = game.getCardState(c, null);
-                        if (newCard == null || !newCard.equalsWithGameTimestamp(c)) {
-                            continue;
-                        }
-                        if (sa.hasAdditionalAbility("ReturnAbility")) {
-                            String valid = sa.getParamOrDefault("ReturnValid", "Card.IsTriggerRemembered");
-
-                            String trigSA = "Mode$ ChangesZone | Origin$ " + cell.getColumnKey() + " | Destination$ " + cell.getRowKey() + " | ValidCard$ " + valid +
-                                    " | TriggerDescription$ " + sa.getAdditionalAbility("ReturnAbility").getParam("SpellDescription");
-
-                            Trigger trig = TriggerHandler.parseTrigger(trigSA, hostCard, sa.isIntrinsic(), null);
-                            trig.setSpawningAbility(sa.copy(lki, true));
-                            trig.setActiveZone(null);
-                            trig.addRemembered(newCard);
-
-                            SpellAbility overridingSA = sa.getAdditionalAbility("ReturnAbility").copy(hostCard, sa.getActivatingPlayer(), false);
-                            // need to reset the parent, additionalAbility does set it to this
-                            if (overridingSA instanceof AbilitySub) {
-                                ((AbilitySub)overridingSA).setParent(null);
-                            }
-
-                            trig.setOverridingAbility(overridingSA);
-
-                            // Delayed Trigger should only happen once, no need for cleanup?
-                            trigHandler.registerThisTurnDelayedTrigger(trig);
-                        }
-                        // no cause there?
-                        Card movedCard = game.getAction().moveTo(cell.getRowKey(), newCard, 0, null, moveParams);
-                        game.getUntilHostLeavesPlayTriggerList().put(cell.getColumnKey(), cell.getRowKey(), movedCard);
-                    }
-                }
-            }
-
-        };
+        GameCommand gc = new ReturnCommand(sa, hostCard, triggerList, lki);
 
         // corner case can lead to host exiling itself during the effect
         if (sa.getParam("Duration").contains("UntilHostLeavesPlay") && !hostCard.isInPlay()) {
@@ -973,7 +1011,8 @@ public abstract class SpellAbilityEffect {
     protected static void addUntilCommand(final SpellAbility sa, GameCommand until, Player controller) {
         addUntilCommand(sa, until, sa.getParam("Duration"), controller);
     }
-    protected static void addUntilCommand(final SpellAbility sa, final GameCommand until, String duration, Player controller) {
+    protected static void addUntilCommand(final SpellAbility sa, final GameCommand command, String duration, Player controller) {
+        final GameCommand until = new UntilCommand(command, sa.getApi() == null ? "Unknown" : sa.getApi().name());
         Card host = sa.getHostCard();
         final Game game = host.getGame();
         // in case host was LKI or still resolving

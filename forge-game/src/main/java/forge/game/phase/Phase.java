@@ -156,6 +156,16 @@ public class Phase implements java.io.Serializable {
         return places;
     }
 
+    /** Every command waiting in this phase. */
+    public final List<GameCommand> commands() {
+        final List<GameCommand> all = Lists.newArrayList(at);
+        all.addAll(until);
+        all.addAll(untilMap.values());
+        all.addAll(untilEndMap.values());
+        all.addAll(registerMap.values());
+        return all;
+    }
+
     /** Put {@code c} where {@link #placesOf} said one waited. */
     public final void putAt(final String place, final List<Player> players, final GameCommand c) {
         final int colon = place.indexOf(':');

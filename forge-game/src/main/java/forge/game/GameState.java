@@ -137,6 +137,8 @@ public class GameState {
      * that the ability does not say again (who it remembers, its choices). See {@link #effectLine}.
      */
     private final List<String> effects = new ArrayList<>();
+    /** The returns waiting for a duration to end, one {@code return=} line each ({@link #returnLine}). */
+    private final List<String> returns = new ArrayList<>();
     /** The effect cards {@link #effects} carries, as the text was written. */
     private final Set<Card> carriedEffects = new HashSet<>();
 
@@ -184,6 +186,7 @@ public class GameState {
         if (dayTime != null) sb.append(TextUtil.concatNoSpace("daytime=", dayTime, "\n"));
         for (String t : delayedTriggers) sb.append(TextUtil.concatNoSpace("delayedtrigger=", t, "\n"));
         for (String e : effects) sb.append(TextUtil.concatNoSpace("effect=", e, "\n"));
+        for (String r : returns) sb.append(TextUtil.concatNoSpace("return=", r, "\n"));
 
         int playerIndex = 0;
         for (PlayerState p : playerStates) {
@@ -301,9 +304,19 @@ public class GameState {
             for (Object o : eff.getRemembered()) if (o instanceof Card c) cardsReferencedByID.add(c);
             cardsReferencedByID.addAll(eff.getImprintedCards());
             cardsReferencedByID.addAll(eff.getChosenCards());
-            for (String place : untilPlaces(eff)) {
-                if (place.startsWith("card:")) cardsReferencedByID.add(game.findById(Integer.parseInt(place.split(":")[1])));
+            markPlaces(game, untilPlaces(eff));
+        }
+        returns.clear();
+        for (Entry<GameCommand, SpellAbilityEffect.ReturnCommand> e : waitingReturns(game).entrySet()) {
+            final String line = returnLine(e.getValue(), e.getKey());
+            if (line == null) continue;
+            returns.add(line);
+            final Map<String, String> f = fields(line);
+            cardsReferencedByID.add(e.getValue().hostCard());
+            for (String cell : ids(f.get("moved"))) {
+                for (String id : cell.split(">", 3)[2].split("/")) cardsReferencedByID.add(game.findById(Integer.parseInt(id)));
             }
+            markPlaces(game, ids(f.get("until")));
         }
         for (ZoneType zone : ZONES.keySet()) {
             // Init texts to empty, so that restoring will clear the state
@@ -399,6 +412,13 @@ public class GameState {
             if (f[2].equals("thisturn")) th.registerThisTurnDelayedTrigger(t);
             else if (f[2].equals("delayed")) th.registerDelayedTrigger(t);
             else th.registerPlayerDefinedDelayedTrigger(parsePlayerString(game, f[2]), t);
+        }
+    }
+
+    /** Keep the ids of the cards a command waits on ({@code card:<id>:<list>}). */
+    private void markPlaces(final Game game, final List<String> places) {
+        for (String place : places) {
+            if (place.startsWith("card:")) cardsReferencedByID.add(game.findById(Integer.parseInt(place.split(":")[1])));
         }
     }
 
@@ -530,19 +550,159 @@ public class GameState {
         final SpellAbility sa = eff.getEffectSourceAbility();
         final boolean lasting = "Permanent".equals(sa.getParam("Duration"));
         final Game game = eff.getGame();
-        final java.util.function.Predicate<GameCommand> ends = c -> c instanceof SpellAbilityEffect.ExileEffectCommand x && x.effect() == eff;
-        if (game.sbaCheckedCommandList.stream().anyMatch(ends)) return null;
+        final List<String> places = commandPlaces(game, c -> unwrapped(c) instanceof SpellAbilityEffect.ExileEffectCommand x && x.effect() == eff);
+        return places != null && lasting == places.isEmpty() ? places : null;
+    }
+
+    /**
+     * Where the commands {@code test} picks wait: {@code phase:<phase>:<place>} ({@link
+     * forge.game.phase.Phase#placesOf}) and {@code card:<id>:<list>} ({@link Card#commandPlacesOf}); null
+     * when one waits where the text cannot say (a state-based-action check, a card it does not write).
+     */
+    private static List<String> commandPlaces(final Game game, final java.util.function.Predicate<GameCommand> test) {
+        if (game.sbaCheckedCommandList.stream().anyMatch(test)) return null;
         final List<String> places = new ArrayList<>();
         for (Entry<String, forge.game.phase.Phase> e : phases(game).entrySet()) {
-            for (String place : e.getValue().placesOf(ends, game.getPlayers())) places.add("phase:" + e.getKey() + ":" + place);
+            for (String place : e.getValue().placesOf(test, game.getPlayers())) places.add("phase:" + e.getKey() + ":" + place);
         }
         for (Card c : game.getCardsInGame()) {
-            final List<String> lists = c.commandPlacesOf(ends);
+            final List<String> lists = c.commandPlacesOf(test);
             if (lists.isEmpty()) continue;
             if (!writtenWithId(c)) return null;
             for (String list : lists) places.add("card:" + c.getId() + ":" + list);
         }
-        return lasting == places.isEmpty() ? places : null;
+        return places;
+    }
+
+    /** Put {@code command} back in every place {@link #commandPlaces} wrote. */
+    private void putCommand(final Game game, final String places, final GameCommand command) {
+        for (String place : ids(places)) {
+            final String[] p = place.split(":", 3);
+            if (p[0].equals("phase")) phases(game).get(p[1]).putAt(p[2], game.getPlayers(), command);
+            else idToCard.get(Integer.parseInt(p[1])).addCommand(p[2], command);
+        }
+    }
+
+    /** Every command waiting in the game, in a phase, on a card or for a state-based-action check. */
+    private static List<GameCommand> waitingCommands(final Game game) {
+        final List<GameCommand> waiting = new ArrayList<>(game.sbaCheckedCommandList);
+        for (forge.game.phase.Phase phase : phases(game).values()) waiting.addAll(phase.commands());
+        for (Card c : game.getCardsInGame()) waiting.addAll(c.commands());
+        return waiting;
+    }
+
+    /**
+     * A return waiting for its duration to end ({@link SpellAbilityEffect.ReturnCommand}: Banisher Priest's
+     * "until it leaves the battlefield") as its {@code return=} line, or null when the line would not put
+     * it back as it is: its host must be a written card holding the ability, every card still waiting to
+     * return a written card, and its ability without a {@code ReturnAbility} (whose trigger is made from
+     * the host as it was then, which the text does not hold). {@code wrapper} is the command as it waits.
+     */
+    private static String returnLine(final SpellAbilityEffect.ReturnCommand r, final GameCommand wrapper) {
+        final Card host = r.hostCard();
+        final Game game = host.getGame();
+        if (!writtenWithId(host) || game.getCardState(host, null) != host || r.sa().hasParam("ReturnAbility")) return null;
+        final List<SpellAbility> abilities = sourceAbilities(host);
+        int at = -1;
+        for (int i = 0; i < abilities.size() && at < 0; i++) {
+            final SpellAbility a = abilities.get(i);
+            if (a.getApi() == r.sa().getApi() && a.getMapParams().equals(r.sa().getMapParams())) at = i;
+        }
+        if (at < 0) return null;
+        final List<String> moved = new ArrayList<>();
+        for (com.google.common.collect.Table.Cell<ZoneType, ZoneType, CardCollection> cell : r.moved().cellSet()) {
+            final List<String> waiting = new ArrayList<>();
+            for (Card c : cell.getValue()) {
+                if (!host.getUntilLeavesBattlefield().contains(c) || game.getCardState(c, null) != c) continue;
+                if (!writtenWithId(c)) return null;
+                waiting.add(String.valueOf(c.getId()));
+            }
+            if (!waiting.isEmpty()) moved.add(cell.getRowKey() + ">" + cell.getColumnKey() + ">" + String.join("/", waiting));
+        }
+        final List<String> places = commandPlaces(game, c -> c == wrapper);
+        if (places == null || places.isEmpty()) return null;
+        final StringBuilder f = new StringBuilder();
+        f.append("host=").append(host.getId()).append('\n');
+        f.append("at=").append(at).append('\n');
+        if (r.sa().getActivatingPlayer() != null) f.append("activator=P").append(game.getPlayers().indexOf(r.sa().getActivatingPlayer())).append('\n');
+        f.append("moved=").append(String.join(",", moved)).append('\n');
+        f.append("until=").append(String.join(",", places)).append('\n');
+        return base64(f.toString());
+    }
+
+    /** The returns waiting in the game, each once, as the command that waits and the return it runs. */
+    private static Map<GameCommand, SpellAbilityEffect.ReturnCommand> waitingReturns(final Game game) {
+        final Map<GameCommand, SpellAbilityEffect.ReturnCommand> returns = new IdentityHashMap<>();
+        for (GameCommand c : waitingCommands(game)) {
+            if (c instanceof SpellAbilityEffect.UntilCommand u && u.spent()) continue;
+            if (unwrapped(c) instanceof SpellAbilityEffect.ReturnCommand r) returns.put(c, r);
+        }
+        return returns;
+    }
+
+    /** Make every {@code return=} line's return again, on the cards this text just made, and put it where it waited. */
+    private void handleReturns(final Game game) {
+        for (String line : returns) {
+            final Map<String, String> f = fields(line);
+            final Card host = idToCard.get(Integer.parseInt(f.get("host")));
+            final List<SpellAbility> abilities = host == null ? List.of() : sourceAbilities(host);
+            final int at = Integer.parseInt(f.get("at"));
+            if (at >= abilities.size()) {
+                System.err.println("ERROR: no ability " + at + " on card " + f.get("host") + " to return what it moved");
+                continue;
+            }
+            final SpellAbility sa = abilities.get(at);
+            if (f.containsKey("activator")) sa.setActivatingPlayer(parsePlayerString(game, f.get("activator")));
+            final CardZoneTable moved = new CardZoneTable();
+            for (String cell : ids(f.get("moved"))) {
+                final String[] p = cell.split(">", 3);
+                final CardCollection cards = new CardCollection();
+                for (String id : p[2].split("/")) cards.add(idToCard.get(Integer.parseInt(id)));
+                moved.put(ZoneType.smartValueOf(p[0]), ZoneType.smartValueOf(p[1]), cards);
+                host.addUntilLeavesBattlefield(cards);
+            }
+            putCommand(game, f.get("until"), SpellAbilityEffect.untilCommand(new SpellAbilityEffect.ReturnCommand(sa, host, moved, null), sa.getApi().name()));
+        }
+    }
+
+    private static Map<String, String> fields(final String line) {
+        final Map<String, String> f = new HashMap<>();
+        for (String kv : unbase64(line).split("\n")) {
+            final int eq = kv.indexOf('=');
+            if (eq > 0) f.put(kv.substring(0, eq), kv.substring(eq + 1));
+        }
+        return f;
+    }
+
+    private static GameCommand unwrapped(final GameCommand c) {
+        return c instanceof SpellAbilityEffect.UntilCommand u ? u.command() : c;
+    }
+
+    /**
+     * The commands waiting in the game that this text does not write, each as {@code command:<origin>}:
+     * the ApiType of the ability that made it, or the class that registered it. An effect card's end
+     * and a control's end are not among them (an effect card or a control this text does not carry is
+     * named as one already), nor a return a {@code return=} line writes, nor a duration's end that has run
+     * from another place it waited.
+     */
+    private static Set<String> unwrittenCommands(final Game game) {
+        final Set<String> kinds = new TreeSet<>();
+        for (GameCommand c : waitingCommands(game)) {
+            if (c instanceof SpellAbilityEffect.UntilCommand u && u.spent()) continue;
+            final GameCommand inner = unwrapped(c);
+            if (inner instanceof SpellAbilityEffect.ExileEffectCommand || inner instanceof forge.game.ability.effects.ControlGainEffect.LoseControlCommand) continue;
+            if (inner instanceof SpellAbilityEffect.ReturnCommand r && returnLine(r, c) != null) continue;
+            kinds.add("command:" + (c instanceof SpellAbilityEffect.UntilCommand u ? u.origin() : registrar(c)));
+        }
+        return kinds;
+    }
+
+    /** The class a command was written in, without its package or its anonymous and lambda suffixes. */
+    private static String registrar(final GameCommand c) {
+        final String name = c.getClass().getName();
+        final String simple = name.substring(name.lastIndexOf('.') + 1);
+        final int dollar = simple.indexOf('$');
+        return dollar < 0 ? simple : simple.substring(0, dollar);
     }
 
     private static String base64(final String s) {
@@ -556,11 +716,7 @@ public class GameState {
     /** Make every {@code effect=} line's card again, from its ability on the card this text just made, and put it in its owner's command zone. */
     private void handleEffects(final Game game) {
         for (String line : effects) {
-            final Map<String, String> f = new HashMap<>();
-            for (String kv : unbase64(line).split("\n")) {
-                final int eq = kv.indexOf('=');
-                if (eq > 0) f.put(kv.substring(0, eq), kv.substring(eq + 1));
-            }
+            final Map<String, String> f = fields(line);
             final Card host = idToCard.get(Integer.parseInt(f.get("host")));
             final List<SpellAbility> abilities = host == null ? List.of() : sourceAbilities(host);
             final int at = Integer.parseInt(f.get("at"));
@@ -597,12 +753,7 @@ public class GameState {
             for (String n : ids(f.get("named"))) named.add(unbase64(n));
             if (!named.isEmpty()) eff.setNamedCards(named);
             if (f.containsKey("number")) eff.setChosenNumber(Integer.parseInt(f.get("number")));
-            final GameCommand ends = new SpellAbilityEffect.ExileEffectCommand(eff);
-            for (String place : ids(f.get("until"))) {
-                final String[] p = place.split(":", 3);
-                if (p[0].equals("phase")) phases(game).get(p[1]).putAt(p[2], game.getPlayers(), ends);
-                else idToCard.get(Integer.parseInt(p[1])).addCommand(p[2], ends);
-            }
+            putCommand(game, f.get("until"), SpellAbilityEffect.untilCommand(new SpellAbilityEffect.ExileEffectCommand(eff), ApiType.Effect.name()));
             eff.updateStateForView();
             owner.getZone(ZoneType.Command).add(eff);
             owner.updateZoneForView(owner.getZone(ZoneType.Command));
@@ -625,7 +776,9 @@ public class GameState {
      * effect) — with the managed effect cards it does recreate ({@link #CARRIED_EFFECTS}) left out
      * and the others named ({@code effect:keyword}). Control is written in its layers; what is not is
      * a control effect that ends on a condition ({@code control-condition}: "for as long as", "until
-     * it untaps"), whose condition lives in an anonymous command. Empty is the whole game.
+     * it untaps"), whose condition lives in an anonymous command. Then every other command waiting to
+     * end something, in a phase or on a card ({@link #unwrittenCommands}: {@code command:<origin>}),
+     * which no line writes. Empty is the whole game.
      */
     public static List<String> unwritten(final Game game) {
         final Set<String> kinds = new TreeSet<>();
@@ -651,6 +804,7 @@ public class GameState {
         for (Trigger t : th.getDelayedTriggers()) if (!th.getThisTurnDelayedTriggers().contains(t) && delayedTriggerLine(t, "delayed") == null) kinds.add("delayed-trigger");
         for (Trigger t : th.getThisTurnDelayedTriggers()) if (delayedTriggerLine(t, "thisturn") == null) kinds.add("delayed-trigger");
         for (Trigger t : th.getPlayerDefinedDelayedTriggers().values()) if (delayedTriggerLine(t, "P0") == null) kinds.add("delayed-trigger");
+        kinds.addAll(unwrittenCommands(game));
         return new ArrayList<>(kinds);
     }
 
@@ -957,6 +1111,7 @@ public class GameState {
         playerStates.clear();
         delayedTriggers.clear();
         effects.clear();
+        returns.clear();
         lines.forEach(this::parseLine);
     }
 
@@ -1012,6 +1167,8 @@ public class GameState {
             delayedTriggers.add(categoryValue.trim());
         } else if (categoryName.equals("effect")) {
             effects.add(categoryValue.trim());
+        } else if (categoryName.equals("return")) {
+            returns.add(categoryValue.trim());
         } else if (categoryName.equals("removesummoningsickness")) {
             removeSummoningSickness = categoryValue.equalsIgnoreCase("true");
         } else if (categoryName.endsWith("life")) {
@@ -1129,6 +1286,7 @@ public class GameState {
         }
         handleGamePieces(game);
         handleEffects(game);
+        handleReturns(game);
         handleControlLayers(game);
         handleCardAttachments();
         handleChosenEntities();

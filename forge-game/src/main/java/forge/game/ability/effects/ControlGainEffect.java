@@ -262,24 +262,23 @@ public class ControlGainEffect extends SpellAbilityEffect {
     public static final java.util.Set<String> CARRIED_CONDITIONS = java.util.Set.of("LeavesPlay", "Untap", "LoseControl");
 
     private static GameCommand getLoseControlCommand(final Card c, final long tStamp, final Card host) {
-        final GameCommand loseControl = new GameCommand() {
-            private static final long serialVersionUID = 878543373519872418L;
+        return new LoseControlCommand(c, tStamp, host);
+    }
 
-            @Override
-            public void run() {
-                if (StaticAbilityCantGainControl.cantGainControl(c)) {
-                    return;
-                }
-                if (c.isInPlay()) {
-                    c.removeTempController(tStamp);
-                    c.getGame().getAction().controllerChangeZoneCorrection(c);
-                }
-                host.removeGainControlTargets(c);
-                c.removeChangedSVars(tStamp, 0);
+    /** The end of a control this effect gave {@code c} at {@code tStamp}: named, so a turn-start text can tell it from what it cannot write. */
+    public record LoseControlCommand(Card c, long tStamp, Card host) implements GameCommand {
+        @Override
+        public void run() {
+            if (StaticAbilityCantGainControl.cantGainControl(c)) {
+                return;
             }
-        };
-
-        return loseControl;
+            if (c.isInPlay()) {
+                c.removeTempController(tStamp);
+                c.getGame().getAction().controllerChangeZoneCorrection(c);
+            }
+            host.removeGainControlTargets(c);
+            c.removeChangedSVars(tStamp, 0);
+        }
     }
 
     private CardCollectionView getDefinedCards(final SpellAbility sa) {
