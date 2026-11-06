@@ -2799,6 +2799,15 @@ public class Player extends GameEntity implements Comparable<Player> {
      * {@code initiative}, {@code blessing}, {@code enduring-story}, {@code contraption-sprocket},
      * {@code radiation}, {@code speed}, {@code commander}), or null when it is none of them.
      */
+    /**
+     * Whether a resolved ability gave this player a keyword (static id 0, {@code PumpEffect},
+     * {@code ProtectAllEffect}); without one, every keyword the keyword card shows is a static
+     * ability's, which gives it again wherever its host is.
+     */
+    public boolean hasResolvedKeywords() {
+        return changedKeywords.columnKeySet().contains(0L);
+    }
+
     public String managedEffectName(final Card c) {
         if (c == null) return null;
         if (c == keywordEffect) return "keyword";
@@ -3616,11 +3625,16 @@ public class Player extends GameEntity implements Comparable<Player> {
     }
 
     public Card getKeywordCard() {
+        final PlayerZone com = getZone(ZoneType.Command);
         if (keywordEffect != null) {
+            // A zone emptied under it (GameState sets a command zone from its text after the battlefield's
+            // statics made this card) would leave its traits, a player's hexproof among them, in no zone.
+            if (!com.contains(keywordEffect)) {
+                com.add(keywordEffect);
+                this.updateZoneForView(com);
+            }
             return keywordEffect;
         }
-
-        final PlayerZone com = getZone(ZoneType.Command);
 
         keywordEffect = new Card(game.nextCardId(), null, game);
         keywordEffect.setGamePieceType(GamePieceType.EFFECT);
