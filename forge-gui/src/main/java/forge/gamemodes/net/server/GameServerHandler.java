@@ -43,8 +43,7 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
     protected void runInBackground(final ChannelHandlerContext ctx, final ProtocolMethod protocolMethod, final Runnable toRun) {
         if (ACTS.contains(protocolMethod) && getToInvoke(ctx) instanceof PlayerControllerHuman pch) {
             final ActGate gate = ActGate.of(pch.getGame());
-            final long ticket = gate.ticket();
-            super.runInBackground(ctx, protocolMethod, () -> gate.run(ticket, () -> {
+            final Runnable settled = () -> {
                 gate.settle(() -> {
                     if (pch.getGame().isGameOver()) {
                         return true;
@@ -53,7 +52,14 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
                     return input != null && !(input instanceof InputLockUI);
                 }, BETWEEN_INPUTS_MS);
                 toRun.run();
-            }));
+            };
+            // A concede ends the game for every act behind it: it goes ahead of them (ActGate#runFirst).
+            if (protocolMethod == ProtocolMethod.concede) {
+                super.runInBackground(ctx, protocolMethod, () -> gate.runFirst(settled));
+                return;
+            }
+            final long ticket = gate.ticket();
+            super.runInBackground(ctx, protocolMethod, () -> gate.run(ticket, settled));
         } else {
             super.runInBackground(ctx, protocolMethod, toRun);
         }

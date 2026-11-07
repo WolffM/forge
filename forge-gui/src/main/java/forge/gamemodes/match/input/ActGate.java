@@ -35,6 +35,8 @@ public final class ActGate {
     private long issued;
     private long serving;
     private Thread owner;
+    /** Acts waiting to go ahead of the queue ({@link #runFirst}): a queued act waits for them too. */
+    private int first;
     /** The inputs that acts handed the game back to wait on, by the latch each releases. */
     private final List<CountDownLatch> parked = new ArrayList<>();
     /** Every input some thread is waiting on — the game thread's and the parked acts' — by its latch. */
@@ -47,6 +49,21 @@ public final class ActGate {
 
     public void run(final long ticket, final Runnable act) {
         enter(ticket);
+        try {
+            act.run();
+        } finally {
+            leave();
+        }
+    }
+
+    /**
+     * An act that takes the game ahead of every queued one, as soon as no act holds it: a concede.
+     * It still runs one at a time with the rest. Queued behind a seat's own presses it waited for
+     * each of them, up to its hold apiece, and a seat that had pressed a re-armed button again and
+     * again conceded into a game that went on without it.
+     */
+    public void runFirst(final Runnable act) {
+        enterFirst();
         try {
             act.run();
         } finally {
@@ -86,7 +103,7 @@ public final class ActGate {
 
     private synchronized void enter(final long ticket) {
         boolean interrupted = false;
-        while (ticket != serving || owner != null || resumable()) {
+        while (ticket != serving || owner != null || first > 0 || resumable()) {
             try {
                 wait();
             } catch (final InterruptedException e) {
@@ -94,6 +111,23 @@ public final class ActGate {
             }
         }
         serving++;
+        owner = Thread.currentThread();
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private synchronized void enterFirst() {
+        boolean interrupted = false;
+        first++;
+        while (owner != null || resumable()) {
+            try {
+                wait();
+            } catch (final InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        first--;
         owner = Thread.currentThread();
         if (interrupted) {
             Thread.currentThread().interrupt();
