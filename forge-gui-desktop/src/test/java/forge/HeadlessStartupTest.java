@@ -73,11 +73,12 @@ public class HeadlessStartupTest {
 
     /**
      * The whole of {@code Main}'s startup — including {@code GuiBase.setInterface(new GuiDesktop())},
-     * which is where the original bug struck — must survive with no display. {@code server} is used
+     * which is where the original bug struck — must survive with no display. {@code server --help} is used
      * because it is the one console mode that returns without loading the card database.
      */
     public void mainStartsHeadless() throws Exception {
-        ProbeResult result = runInThrowawayHome(Main.class.getName(), List.of(), "server");
+        // This fork's server mode hosts until stopped; its --help is the console mode that returns at once.
+        ProbeResult result = runInThrowawayHome(Main.class.getName(), List.of(), "server", "--help");
         assertEquals("Main failed to start headless, output was:\n" + result.output, 0, result.exitCode);
         assertFalse("Main hit a display dependency during startup:\n" + result.output,
                 result.output.contains("HeadlessException"));
@@ -263,8 +264,8 @@ public class HeadlessStartupTest {
         public static void main(final String[] args) {
             Runtime.getRuntime().addShutdownHook(new Thread(() ->
                     System.out.println("java.awt.headless=" + System.getProperty("java.awt.headless"))));
-            // "server" returns immediately; every other console mode loads the card database first.
-            Main.main(new String[] {"server"});
+            // "server --help" returns immediately; every other console mode loads the card database first.
+            Main.main(new String[] {"server", "--help"});
         }
     }
 
