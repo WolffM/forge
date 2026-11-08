@@ -1030,9 +1030,6 @@ public class ComputerUtilMana {
         return mask;
     }
 
-    private static void resetPayment(List<SpellAbility> payments) {
-        for (SpellAbility sa : payments) {
-            sa.getManaPart().clearExpressChoice();
     private static Map<AbilityManaPart, String> expressChoices(final Multimap<ManaCostShard, SpellAbility> sources) {
         final Map<AbilityManaPart, String> choices = new IdentityHashMap<>();
         if (sources != null) {

@@ -167,9 +167,8 @@ public final class DedicatedServer {
             }
         });
 
-        System.out.printf("Dedicated server listening on port %d (hosting=%s, upnpMapped=%s, "
-                        + "seats=%d)%n",
-                boundPort, server.isHosting(), server.isUPnPMapped(), lobby.getNumberOfSlots());
+        System.out.printf("Dedicated server listening on port %d (hosting=%s, seats=%d)%n",
+                boundPort, server.isHosting(), lobby.getNumberOfSlots());
         for (final Map.Entry<String, String> address
                 : FServerManager.getAllLocalAddresses().entrySet()) {
             System.out.printf("  %s\t%s%n", address.getValue(), address.getKey());

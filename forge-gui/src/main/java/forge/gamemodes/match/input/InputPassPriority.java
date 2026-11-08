@@ -28,7 +28,6 @@ import forge.game.player.PlayerView;
 import forge.game.player.actions.PassPriorityAction;
 import forge.game.spellability.SpellAbility;
 import forge.game.spellability.StackItemView;
-import forge.game.undo.UndoManager;
 import forge.gamemodes.match.DeclineScope;
 import forge.gamemodes.match.SuggestionType;
 import forge.gamemodes.match.YieldController;
@@ -174,14 +173,10 @@ public class InputPassPriority extends InputSyncronizedBase {
         showMessage(getTurnPhasePriorityMessage(getController().getGame()));
         chosenSa = null;
         Localizer localizer = Localizer.getInstance();
-        /*if (getController().canUndoLastAction()) { //allow undoing with cancel button if can undo last action
-            getController().getGui().updateButtons(getOwner(), localizer.getMessage("lblOK"), localizer.getMessage("lblUndo") + " (" + getController().getGame().getStack().getUndoStackSize() + ")", true, true, true);
-        }*/
-        if (getController().canUndoLastAction()) {
-            final UndoManager um = getController().getGame().getUndoManager();
-            final int n = um.undosLeft();
-            final String undoLabel = localizer.getMessage("lblUndo") + (n > 0 ? " (" + n + ")" : "");
-            getController().getGui().updateButtons(getOwner(), localizer.getMessage("lblOK"), undoLabel, true, true, true, true);
+        if (getController().canUndoLastAction()) { //allow undoing with cancel button if can undo last action
+            // the stack's mana-ability undo (PlayerControllerHuman.tryUndoLastAction)
+            final int n = getController().getGame().getStack().getUndoStackSize();
+            getController().getGui().updateButtons(getOwner(), localizer.getMessage("lblOK"), localizer.getMessage("lblUndo") + " (" + n + ")", true, true, true, true);
         }
         else { //otherwise allow ending turn with cancel button
             getController().getGui().updateButtons(getOwner(), localizer.getMessage("lblOK"), localizer.getMessage("lblEndTurn"), true, true, true);
