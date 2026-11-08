@@ -191,7 +191,8 @@ public class MagicStack /* extends MyObservable */ implements Iterable<SpellAbil
     }
 
     public final boolean isResolving(Card c) {
-        if (!isResolving()) {
+        // GameState.applyToGame marks the stack resolving while it sets a board up, with nothing resolving
+        if (!isResolving() || curResolving == null) {
             return false;
         }
         return c.equals(curResolving.getHostCard());
