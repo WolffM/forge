@@ -87,6 +87,9 @@ public class GameRandomTest extends AITest {
     private static String log(final Game game) {
         final StringBuilder sb = new StringBuilder();
         for (final GameLogEntry e : game.getGameLog().getAllEntries()) {
+            if (e.message().startsWith("Match Duration")) {
+                continue; // wall-clock time, not play
+            }
             sb.append(e.type()).append(' ').append(e.message()).append('\n');
         }
         return sb.toString();

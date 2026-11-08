@@ -28,10 +28,13 @@ public class MyRandomTest {
 
     @Test
     public void outsideAGameDrawsFromTheGlobal() {
-        final Random g = new Random(1);
-        MyRandom.setRandom(g);
+        MyRandom.setRandom(new Random(1));
         AssertJUnit.assertNull(MyRandom.getBound());
-        AssertJUnit.assertSame(g, MyRandom.getRandom());
+        // the global is wrapped to count its draws (UndoManager's randomness barrier), so compare the stream it draws
+        final Random same = new Random(1);
+        for (int i = 0; i < 8; i++) {
+            AssertJUnit.assertEquals(same.nextInt(), MyRandom.getRandom().nextInt());
+        }
     }
 
     @Test
@@ -63,8 +66,8 @@ public class MyRandomTest {
      */
     @Test
     public void aPooledTaskRunsWithItsSubmittersBindingOnAReusedThread() throws Exception {
-        final Random g = new Random(1);
-        MyRandom.setRandom(g);
+        MyRandom.setRandom(new Random(1));
+        final Random g = MyRandom.getRandom(); // the global, as wrapped to count its draws
         final Random gameA = new Random(2);
         final Random gameB = new Random(3);
         final ExecutorService pool = Executors.newFixedThreadPool(1);

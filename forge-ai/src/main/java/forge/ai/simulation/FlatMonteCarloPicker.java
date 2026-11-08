@@ -1443,10 +1443,10 @@ public final class FlatMonteCarloPicker {
     private static Long rollout(final Player player, final Candidate cand, final long seed, final Config cfg,
                                 final int playoutPlays, final Mode mode) {
         TOTAL_ROLLOUTS.incrementAndGet();
-        final Random savedRandom = MyRandom.getRandom();
+        // The rollout draws from its own seeded random, bound to this thread only: a process may run
+        // several games, and a thread working for a game draws from that game's random, not the global.
+        final MyRandom.Scope rolloutRandom = MyRandom.bind(new Random(seed));
         try {
-            // MyRandom is global state; this is safe because the game thread is waiting for this AI decision.
-            MyRandom.setRandom(new Random(seed));
 
             final GameSimulator sim = GameSimulator.forRollout(player.getGame(), player, mode == Mode.RESPOND);
             final Game simGame = sim.getSimulatedGameState();
@@ -1485,7 +1485,7 @@ public final class FlatMonteCarloPicker {
             lastRolloutProblem = "error";
             return null;
         } finally {
-            MyRandom.setRandom(savedRandom);
+            rolloutRandom.close();
         }
     }
 
