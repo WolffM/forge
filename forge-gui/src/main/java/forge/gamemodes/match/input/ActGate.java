@@ -71,11 +71,22 @@ public final class ActGate {
         }
     }
 
+    /** How a thread waits for an input's latch: the GUI's own way ({@code IGuiGame.awaitInput}). */
+    @FunctionalInterface
+    public interface Waiter {
+        void await(CountDownLatch latch) throws InterruptedException;
+    }
+
     /** Waits for an input's latch; an act holding the game hands it back for the wait. */
     public void await(final CountDownLatch latch) throws InterruptedException {
+        await(latch, CountDownLatch::await);
+    }
+
+    /** Waits for an input's latch the way {@code waiter} does; an act holding the game hands it back for the wait. */
+    public void await(final CountDownLatch latch, final Waiter waiter) throws InterruptedException {
         final boolean parkedHere = startWait(latch);
         try {
-            latch.await();
+            waiter.await(latch);
         } finally {
             endWait(latch, parkedHere);
         }

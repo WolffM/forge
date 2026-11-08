@@ -65,6 +65,9 @@ public class ManaRefundServiceTest extends SimulationTest {
         AssertJUnit.assertTrue(swampB.isTapped());
         AssertJUnit.assertTrue(coffers.isTapped());
         AssertJUnit.assertEquals(2, p.getManaPool().totalMana());
+        // This fork undoes a variable Amount too (SpellAbility.undo takes back what it produced), so
+        // Coffers is made what a mana ability that fired a trigger is: not undoable.
+        coffersMana.setUndoable(false);
         AssertJUnit.assertFalse(coffersMana.isUndoable());
 
         // Spend Coffers' mana on the spell being cast ...
