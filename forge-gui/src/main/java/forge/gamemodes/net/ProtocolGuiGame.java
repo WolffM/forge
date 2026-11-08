@@ -468,9 +468,16 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
         syncAndSend(ProtocolMethod.setCard, card);
     }
 
+    /**
+     * Whether a client picks a spell target from the stack view ({@code selectStackItem}); off, the host
+     * asks for it as a choice ({@code TargetSelection.chooseCardFromStack}). A host whose clients have
+     * no stack picker turns it off.
+     */
+    public static boolean pickStackTargets = true;
+
     @Override
     public boolean canPickStackTargets() {
-        return true;
+        return pickStackTargets;
     }
 
     @Override

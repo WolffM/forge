@@ -80,6 +80,9 @@ public abstract class InputBase implements java.io.Serializable, Input {
         if (isBusy()) {
             return;
         }
+        // A host whose client reads a prompt as the window for the cards it was offered sends the
+        // selection ahead of the prompt too; ProtocolGuiGame drops the second if nothing changed.
+        showSelection();
         showMessage();
         // showMessage can finish the input, which has already reset the selection
         if (!isFinished()) {
