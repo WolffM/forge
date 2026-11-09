@@ -2724,6 +2724,8 @@ public class AiController {
         final long timeoutNanos = TimeUnit.SECONDS.toNanos(game.getAITimeout());
         AITimeoutTracker.begin(aiId, timeoutNanos);
         final long deadlineNanos = AITimeoutTracker.deadlineNanos(aiId, timeoutNanos);
+        // where the eval thread stopped itself at the deadline, when it did: that cut is reported like a timeout below
+        final java.util.concurrent.atomic.AtomicReference<StackTraceElement[]> expiredAt = new java.util.concurrent.atomic.AtomicReference<>();
         FutureTask<List<SpellAbility>> future = new FutureTask<>(() -> {
             final List<SpellAbility> approvedPlays = new ArrayList<>();
             // the eval thread aborts itself at the shared deadline (or when cancelled) instead of running on as a zombie
@@ -2825,6 +2827,7 @@ public class AiController {
 
                 return approvedPlays;
             } catch (AITimeoutTracker.Expired e) {
+                expiredAt.set(Thread.currentThread().getStackTrace());
                 return approvedPlays; // whatever was approved before time ran out
             } finally {
                 AITimeoutTracker.disarm(evalLimit); // matters as soon as this runs on a pooled thread
@@ -2836,7 +2839,22 @@ public class AiController {
         t.start();
         try {
             // wait only for what is left of the shared deadline (not a fresh full timeout per call)
-            return future.get(Math.max(0, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+            final List<SpellAbility> plays = future.get(Math.max(0, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+            final StackTraceElement[] cut = expiredAt.get();
+            if (cut != null) {
+                // the eval thread reached the deadline first and stopped itself: the decision was cut short all the
+                // same, so it is logged as one, from this thread, where the scan stopped
+                StringBuilder sb = new StringBuilder("AI eval thread at timeout:");
+                for (int i = 0, n = 0; i < cut.length && n < 30; i++) {
+                    if (cut[i].getClassName().equals(Thread.class.getName())) {
+                        continue;
+                    }
+                    sb.append("\n\tat ").append(cut[i]);
+                    n++;
+                }
+                System.out.println(sb);
+            }
+            return plays;
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
             if (e.getCause() instanceof GameEndedException ended) {
                 throw ended; // the game ended mid-scan: this thread unwinds too
