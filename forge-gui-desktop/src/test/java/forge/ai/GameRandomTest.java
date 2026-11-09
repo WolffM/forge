@@ -160,4 +160,24 @@ public class GameRandomTest extends AITest {
         AiCache.clear(a);
         AssertJUnit.assertEquals(4, (int) AiCache.getCached(a, "k", count, null));
     }
+
+    /** A game, with a cached value that holds its own player as the AI's caches do, and nothing else holding it. */
+    private java.lang.ref.WeakReference<Game> gameItsCacheHolds() {
+        final Game game = initAndCreateGame();
+        final forge.game.player.Player p = game.getPlayers().get(0);
+        AiCache.getCached(game, "k", () -> p, null, p);
+        return new java.lang.ref.WeakReference<>(game);
+    }
+
+    @Test
+    public void aGameIsCollectedThoughItsCacheHoldsItsOwnPieces() throws InterruptedException {
+        // Every Flat Monte Carlo rollout plays on a copy of the game and fills that copy's cache; a cache that
+        // kept its game alive kept every copy, and filled a 2 GB heap in minutes.
+        final java.lang.ref.WeakReference<Game> ref = gameItsCacheHolds();
+        for (int i = 0; i < 50 && ref.get() != null; i++) {
+            System.gc();
+            Thread.sleep(20);
+        }
+        AssertJUnit.assertNull("the game was collected", ref.get());
+    }
 }
