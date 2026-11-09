@@ -1,7 +1,5 @@
 package forge.ai;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
@@ -18,11 +16,23 @@ public class AiCache {
 
     // stores result + args as vector, per game: each game's AI clears its own game's cache when it
     // starts a decision, never another game's (whose AI would then recompute, drawing extra random
-    // numbers from its game's stream and so playing differently than the same seed alone)
-    private final static Cache<Game, Multimap<String, List<Object>>> byGame = CacheBuilder.newBuilder().weakKeys().build();
+    // numbers from its game's stream and so playing differently than the same seed alone).
+    // The cache is the game's own (Game.getAiCache), so it is collected with the game, a simulated copy too.
+    private static final Object CREATE = new Object();
 
+    @SuppressWarnings("unchecked")
     private static Multimap<String, List<Object>> of(final Game game) {
-        return byGame.asMap().computeIfAbsent(game, g -> Multimaps.synchronizedMultimap(ArrayListMultimap.create()));
+        Object cache = game.getAiCache();
+        if (cache == null) {
+            synchronized (CREATE) {
+                cache = game.getAiCache();
+                if (cache == null) {
+                    cache = Multimaps.synchronizedMultimap(ArrayListMultimap.<String, List<Object>>create());
+                    game.setAiCache(cache);
+                }
+            }
+        }
+        return (Multimap<String, List<Object>>) cache;
     }
 
     public static boolean identity(Object a, Object b) {
@@ -56,9 +66,8 @@ public class AiCache {
 
     // TODO add different scopes + staleness indicator
     public static void clear(Game game) {
-        final Multimap<String, List<Object>> dataMap = byGame.getIfPresent(game);
-        if (dataMap != null) {
-            dataMap.clear();
+        if (game.getAiCache() != null) {
+            of(game).clear();
         }
     }
 

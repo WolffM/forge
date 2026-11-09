@@ -111,6 +111,20 @@ public class Game {
     // top of the conservative profile values. Set by the Match on mobile ports; ignored when MAX is on. Never inherited.
     public boolean AI_FLAT_MONTE_CARLO_LITE = false;
 
+    /**
+     * The AI's per-game cache (forge.ai.AiCache), held by the game itself so that it dies with the game. A static
+     * map keyed by game, even with weak keys, keeps every game alive: its cached values hold the game's own cards.
+     */
+    private volatile Object aiCache;
+
+    public Object getAiCache() {
+        return aiCache;
+    }
+
+    public void setAiCache(final Object cache) {
+        aiCache = cache;
+    }
+
     public boolean EXPERIMENTAL_RESTORE_SNAPSHOT = false;
 
     // True for the games the AI copies to play out its choices (rollouts): nothing that only matters for the real
