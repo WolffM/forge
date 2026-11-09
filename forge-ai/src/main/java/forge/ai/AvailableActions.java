@@ -447,15 +447,16 @@ public final class AvailableActions {
     }
 
     /**
-     * The AI payer leaves out every mana ability that itself costs mana
-     * ({@code ComputerUtilMana.getAIPlayableMana}: "the AI will miscalculate"), so a Signet
-     * ({1},{T}: add {U}{R}) never counts toward what a player can pay. Count each one the player
-     * can activate here, one at a time: its own mana cost joins the total, and the mana it makes
-     * pays toward it; then ask the payer about the rest.
+     * The AI payer activates at most one mana ability that itself costs mana in a row
+     * ({@code ComputerUtilMana.payManaCost}: "chaining filters risks misplay"), so a Signet whose
+     * {1} only another Signet's mana can pay is out of its reach. Activate the player's rocks in
+     * thought, one at a time: the mana each makes pays toward the total, then its own mana cost
+     * joins it (a rock never pays for itself, an earlier one's cost it can), and the rock is
+     * spent; then ask the payer about the rest without the spent ones.
      */
     private static boolean canAffordWithManaRocks(SpellAbility sa, Player player) {
         final ManaCostBeingPaid cost = ComputerUtilMana.calculateManaCost(sa.getPayCosts(), sa, player, true, 0, false);
-        boolean added = false;
+        final List<Card> spent = new ArrayList<>();
         for (Card rock : player.getCardsIn(ZoneType.Battlefield)) {
             if (rock == sa.getHostCard()) {
                 continue;
@@ -470,17 +471,17 @@ public final class AvailableActions {
                         || part.isComboMana() || part.isAnyMana() || part.isSpecialMana()) {
                     continue;
                 }
-                cost.addManaCost(ma.getPayCosts().getTotalMana());
                 final int amount = ma.amountOfManaGenerated(false);
                 for (String colour : part.mana(ma).split(" ")) {
                     for (int i = 0; i < amount; i++) {
                         cost.ai_payMana(colour, player.getManaPool());
                     }
                 }
-                added = true;
+                cost.addManaCost(ma.getPayCosts().getTotalMana());
+                spent.add(rock);
                 break;
             }
-            if (added && (cost.isPaid() || ComputerUtilMana.canPayManaCost(cost, sa, player, false))) {
+            if (spent.contains(rock) && (cost.isPaid() || ComputerUtilMana.canPayManaCost(cost, sa, player, false, spent))) {
                 return true;
             }
         }

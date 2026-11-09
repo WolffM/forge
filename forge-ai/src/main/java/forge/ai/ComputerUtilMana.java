@@ -58,6 +58,10 @@ public class ComputerUtilMana {
         cost = new ManaCostBeingPaid(cost);
         return payManaCost(cost, sa, ai, true, true, effect) != null;
     }
+    /** As above, with the mana abilities of {@code spent} out of reach: their mana is already counted. */
+    public static boolean canPayManaCost(ManaCostBeingPaid cost, final SpellAbility sa, final Player ai, final boolean effect, final Collection<Card> spent) {
+        return payManaCost(new ManaCostBeingPaid(cost), sa, ai, true, true, effect, spent) != null;
+    }
     public static boolean canPayManaCost(final SpellAbility sa, final Player ai, final int extraMana, final boolean effect) {
         return canPayManaCost(sa.getPayCosts(), sa, ai, extraMana, effect);
     }
@@ -628,6 +632,10 @@ public class ComputerUtilMana {
 
     // returns null if unpayable
     private static List<SpellAbility> payManaCost(final ManaCostBeingPaid cost, final SpellAbility sa, final Player ai, final boolean test, boolean checkPlayable, boolean effect) {
+        return payManaCost(cost, sa, ai, test, checkPlayable, effect, List.of());
+    }
+    private static List<SpellAbility> payManaCost(final ManaCostBeingPaid cost, final SpellAbility sa, final Player ai, final boolean test, boolean checkPlayable, boolean effect,
+            final Collection<Card> spent) {
         if ((sa.isOffering() && sa.getSacrificedAsOffering() == null) || (sa.isEmerge() && sa.getSacrificedAsEmerge() == null)) {
             // nothing was chosen
             return null;
@@ -673,6 +681,9 @@ public class ComputerUtilMana {
         boolean purePhyrexian = cost.containsOnlyPhyrexianMana();
         boolean hasConverge = sa.getHostCard().hasConverge();
         Multimap<ManaCostShard, SpellAbility> sourcesForShards = getSourcesForShards(cost, sa, ai, test, checkPlayable, hasConverge);
+        if (sourcesForShards != null) {
+            sourcesForShards.values().removeIf(m -> spent.contains(m.getHostCard()));
+        }
         // Every mana ability this payment looks at is left producing what it produced before.
         // canPayShardWithSpellAbility writes a candidate's express choice before the candidate can
         // still be turned down (Black Lotus's AILogic, a sacrifice or tap already spoken for), and a
