@@ -119,9 +119,17 @@ public abstract class InputBase implements java.io.Serializable, Input {
         return offersCards() ? List.of() : controller.getUntappable();
     }
 
+    private static final java.util.concurrent.atomic.AtomicInteger SELECTION_IDS = new java.util.concurrent.atomic.AtomicInteger();
+    private final int selectionId = SELECTION_IDS.incrementAndGet();
+
+    /** This input's name on the selections it sends ({@link Selection#input}), unique in the process. */
+    public final int getSelectionId() {
+        return selectionId;
+    }
+
     /** Sends this prompt's marks, with the targets kept marked while a spell's cost is paid. */
     protected final void showSelection() {
-        controller.getGui().setSelection(getSelection().withChosen(controller.getKeptMarks()).withActionable(getActionable()));
+        controller.getGui().setSelection(getSelection().withChosen(controller.getKeptMarks()).withActionable(getActionable()).forInput(selectionId));
     }
 
     @Override
