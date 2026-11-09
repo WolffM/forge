@@ -107,4 +107,18 @@ public class MyRandomTest {
         }
         AssertJUnit.assertSame(game, seen[0]);
     }
+
+    @Test
+    public void aGamesOwnRandomCountsItsDraws() {
+        final Random game = MyRandom.counted(new Random(7));
+        final long outside = MyRandom.callCount();
+        try (MyRandom.Scope ignored = MyRandom.bind(game)) {
+            final long before = MyRandom.callCount();
+            game.nextInt(10);
+            MyRandom.getRandom().nextBoolean();
+            AssertJUnit.assertEquals(before + 2, MyRandom.callCount());
+        }
+        AssertJUnit.assertEquals(outside, MyRandom.callCount());
+        AssertJUnit.assertSame(game, MyRandom.counted(game));
+    }
 }
