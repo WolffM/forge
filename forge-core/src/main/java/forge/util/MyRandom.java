@@ -18,9 +18,12 @@
 package forge.util;
 
 import java.security.SecureRandom;
+import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * <p>
@@ -41,27 +44,65 @@ import java.util.concurrent.Callable;
  * @version $Id$
  */
 public class MyRandom {
-    private static final AtomicLong calls = new AtomicLong();
     /** The JVM-wide random, for code that runs outside any game. */
     private static volatile Random random = new CountingRandom(new SecureRandom());
 
-    /** Every Random method (nextInt, nextBoolean, shuffle, ...) funnels through next(bits). */
+    /** Every Random method (nextInt, nextBoolean, shuffle, ...) funnels through next(bits), so this counts every draw. */
     private static final class CountingRandom extends Random {
         private final Random delegate;
+        private final AtomicLong calls = new AtomicLong();
         CountingRandom(Random delegate) { super(0); this.delegate = delegate; }
         @Override protected int next(int bits) {
             calls.incrementAndGet();
+            if (TRACE) { trace(); }
             return delegate.nextInt() >>> (32 - bits);
         }
         @Override public void setSeed(long seed) {
             if (delegate != null) delegate.setSeed(seed);   // null during super(0)
         }
     }
+
+    /** {@code r}, wrapped so its draws are counted ({@link #callCount}); the stream it draws is unchanged. */
+    public static Random counted(final Random r) {
+        return r instanceof CountingRandom ? r : new CountingRandom(r);
+    }
+
     /**
-     * Number of draws made so far from the JVM-wide random. Used by undo to detect that randomness was
-     * consumed. A game's own random ({@link #bind}) is not counted: a host that binds one turns undo off.
+     * Number of draws made so far from the random this thread draws from ({@link #getRandom}): the bound game's own
+     * random inside a game, the JVM-wide one outside. Undo reads it to detect that randomness was consumed. A random
+     * that was bound without {@link #counted} (a simulation's private stream) reports 0.
      */
-    public static long callCount() { return calls.get(); }
+    public static long callCount() {
+        return getRandom() instanceof CountingRandom c ? c.calls.get() : 0;
+    }
+
+    // Debug only (-Dforge.undo.debug=true): tally draws by thread and call site, to find who consumes randomness.
+    private static final boolean TRACE = Boolean.getBoolean("forge.undo.debug");
+    private static final Map<String, LongAdder> SITES = new ConcurrentHashMap<>();
+
+    private static void trace() {
+        final StringBuilder key = new StringBuilder(Thread.currentThread().getName()).append(" <- ");
+        int shown = 0;
+        for (final StackTraceElement e : new Throwable().getStackTrace()) {
+            final String c = e.getClassName();
+            if (c.startsWith("java.") || c.startsWith("jdk.") || c.startsWith("forge.util.MyRandom")) { continue; }
+            key.append(c.substring(c.lastIndexOf('.') + 1)).append('.').append(e.getMethodName())
+                    .append(':').append(e.getLineNumber()).append(shown < 3 ? " < " : "");
+            if (++shown == 4) { break; }
+        }
+        SITES.computeIfAbsent(key.toString(), k -> new LongAdder()).increment();
+    }
+
+    /** Debug only: the {@code top} busiest draw sites since the last call, as text; clears the tally. */
+    public static String drainTrace(final int top) {
+        final StringBuilder sb = new StringBuilder();
+        SITES.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue().sum(), a.getValue().sum()))
+                .limit(top)
+                .forEach(e -> sb.append("\n    ").append(e.getValue().sum()).append("x ").append(e.getKey()));
+        SITES.clear();
+        return sb.toString();
+    }
 
     /** The random of the game this thread is working for, if any. */
     private static final ThreadLocal<Random> BOUND = new ThreadLocal<>();
@@ -97,7 +138,7 @@ public class MyRandom {
      * @param random the random
      */
     public static void setRandom(Random random) {
-        MyRandom.random = random instanceof CountingRandom ? random : new CountingRandom(random);
+        MyRandom.random = counted(random);
     }
 
     /**

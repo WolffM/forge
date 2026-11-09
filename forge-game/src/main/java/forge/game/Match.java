@@ -54,7 +54,7 @@ public class Match {
         rules = rules0;
         this.title = title;
         final Random bound = MyRandom.getBound();
-        random = bound != null ? bound : new Random(MyRandom.getRandom().nextLong());
+        random = MyRandom.counted(bound != null ? bound : new Random(MyRandom.getRandom().nextLong()));
     }
 
     public Random getRandom() {
@@ -63,7 +63,7 @@ public class Match {
 
     /** Seeds this match: call it before its first game starts. */
     public void setRandom(final Random random0) {
-        random = Objects.requireNonNull(random0);
+        random = MyRandom.counted(Objects.requireNonNull(random0));
     }
 
     public GameRules getRules() {
