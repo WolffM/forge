@@ -52,7 +52,12 @@ public class FGameClient implements IToServer, IHasForgeLog {
     }
 
     static final int HEARTBEAT_INTERVAL_SECONDS = Integer.getInteger("forge.net.heartbeatInterval", 15);
-    static final int READER_IDLE_SECONDS = 45;
+    /**
+     * How long the client waits to read anything from the server before it closes and reconnects: never less than
+     * the server waits for it ({@code forge.net.heartbeatTimeout}), and never less than three heartbeats, whose echoes
+     * are all a quiet server sends. A host that raises either keeps its clients from dropping a server that is still there.
+     */
+    static final int READER_IDLE_SECONDS = Math.max(Integer.getInteger("forge.net.heartbeatTimeout", 45), 3 * HEARTBEAT_INTERVAL_SECONDS);
     private static final int[] BACKOFF_SECONDS = {1, 5, 15, 45, 60};
     private static final int RESUME_WATCH_SECONDS = 5;
     private final IGuiGame clientGui;
