@@ -121,4 +121,22 @@ public class MyRandomTest {
         AssertJUnit.assertEquals(outside, MyRandom.callCount());
         AssertJUnit.assertSame(game, MyRandom.counted(game));
     }
+
+    @Test
+    public void aCountedRandomAsksItsDelegatesOwnMethods() {
+        final Random rigged = new Random(7) {
+            @Override public int nextInt(final int bound) { return bound - 1; }
+        };
+        final Random counted = MyRandom.counted(rigged);
+        for (int i = 0; i < 5; i++) {
+            AssertJUnit.assertEquals(1, counted.nextInt(2));
+        }
+        final Random a = new Random(11), b = MyRandom.counted(new Random(11));
+        for (int i = 0; i < 50; i++) {
+            AssertJUnit.assertEquals(a.nextInt(37), b.nextInt(37));
+            AssertJUnit.assertEquals(a.nextLong(), b.nextLong());
+            AssertJUnit.assertEquals(a.nextDouble(), b.nextDouble());
+            AssertJUnit.assertEquals(a.nextBoolean(), b.nextBoolean());
+        }
+    }
 }

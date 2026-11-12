@@ -53,13 +53,26 @@ public class MyRandom {
         private final AtomicLong calls = new AtomicLong();
         CountingRandom(Random delegate) { super(0); this.delegate = delegate; }
         @Override protected int next(int bits) {
-            calls.incrementAndGet();
-            if (TRACE) { trace(); }
+            count();
             return delegate.nextInt() >>> (32 - bits);
         }
         @Override public void setSeed(long seed) {
             if (delegate != null) delegate.setSeed(seed);   // null during super(0)
         }
+        // Every public draw goes to the delegate's own method, so a delegate that overrides one (a host's rigged
+        // nextInt(bound)) is still asked; Random's versions would only reach the delegate through next(bits).
+        private void count() { calls.incrementAndGet(); if (TRACE) { trace(); } }
+        @Override public int nextInt() { count(); return delegate.nextInt(); }
+        @Override public int nextInt(final int bound) { count(); return delegate.nextInt(bound); }
+        @Override public int nextInt(final int origin, final int bound) { count(); return delegate.nextInt(origin, bound); }
+        @Override public long nextLong() { count(); return delegate.nextLong(); }
+        @Override public long nextLong(final long bound) { count(); return delegate.nextLong(bound); }
+        @Override public long nextLong(final long origin, final long bound) { count(); return delegate.nextLong(origin, bound); }
+        @Override public boolean nextBoolean() { count(); return delegate.nextBoolean(); }
+        @Override public float nextFloat() { count(); return delegate.nextFloat(); }
+        @Override public double nextDouble() { count(); return delegate.nextDouble(); }
+        @Override public double nextGaussian() { count(); return delegate.nextGaussian(); }
+        @Override public void nextBytes(final byte[] bytes) { count(); delegate.nextBytes(bytes); }
     }
 
     /** {@code r}, wrapped so its draws are counted ({@link #callCount}); the stream it draws is unchanged. */
