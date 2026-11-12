@@ -222,6 +222,7 @@ public final class UndoManager {
             if (!heapAllows(false)) { return; }
         }
         final Entry entry;
+        final long captureStart = System.nanoTime();
         try {
             final GameMemento m = recorder.capture(game);   // slow part, no lock held
             lastObjects = m.objectCount();
@@ -242,9 +243,9 @@ public final class UndoManager {
             stack.push(entry); version++;
             if (DEBUG) {
                 debug("depth=" + stack.size() + " retained=" + (retainedBytes() >> 20) + "MB of "
-                        + (maxRetainedBytes >> 20) + "MB, objects=" + lastObjects);
+                        + (maxRetainedBytes >> 20) + "MB, objects=" + lastObjects
+                        + ", capture=" + (System.nanoTime() - captureStart) / 1_000_000 + "ms");
             }
-            //System.out.println("[undo] objects=" + entry.memento().objectCount() + " delta=" + recorder.lastDeltaEntries() + " retained=" + retainedBytes());
             if (stack.size() >= 2) barrierReason = null;
         }
     }
