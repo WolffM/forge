@@ -8,6 +8,7 @@ import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
 import forge.game.player.RegisteredPlayer;
 import forge.gamemodes.match.HostedMatch;
+import forge.gamemodes.match.Selection;
 import forge.gamemodes.match.input.ActGate;
 import forge.gamemodes.net.IRemote;
 import forge.gamemodes.net.ProtocolGuiGame;
@@ -49,10 +50,21 @@ public class InputShowRaceTest {
     static final class WatchedGui extends ProtocolGuiGame {
         private final Map<Thread, Integer> walking = new ConcurrentHashMap<>();
         final List<String> overlaps = Collections.synchronizedList(new ArrayList<>());
+        /** The inputs an act has answered, by selection id: none is shown again. */
+        final java.util.Set<Integer> answered = ConcurrentHashMap.newKeySet();
+        final List<Integer> staleShows = Collections.synchronizedList(new ArrayList<>());
         volatile int edtWalks;
 
         WatchedGui(final IRemote remote) {
             super(remote);
+        }
+
+        @Override
+        public void setSelection(final Selection selection) {
+            if (selection.input() != 0 && answered.contains(selection.input())) {
+                staleShows.add(selection.input());
+            }
+            super.setSelection(selection);
         }
 
         @Override
@@ -76,6 +88,17 @@ public class InputShowRaceTest {
                 walking.computeIfPresent(me, (t, n) -> n == 1 ? null : n - 1);
             }
         }
+    }
+
+    /** {@code act}, recording the input it answered once it is done (an OK or a pick stops it). */
+    private static Runnable answered(final WatchedGui gui, final PlayerControllerHuman seat, final Runnable act) {
+        return () -> {
+            final forge.gamemodes.match.input.Input input = seat.getInputProxy().getInput();
+            act.run();
+            if (input instanceof forge.gamemodes.match.input.InputSyncronizedBase answeredInput && answeredInput.isDone()) {
+                gui.answered.add(answeredInput.getSelectionId());
+            }
+        };
     }
 
     @Test(timeOut = 240_000)
@@ -146,8 +169,8 @@ public class InputShowRaceTest {
                 // and presses again at once, ahead of the next prompt: held until the game waits on that one
                 final long ticket = gate.ticket();
                 final long ahead = gate.ticket();
-                acts.accept(() -> gate.act(seat, ticket, answer));
-                acts.accept(() -> gate.act(seat, ahead, seat::selectButtonOk));
+                acts.accept(() -> gate.act(seat, ticket, answered(gui, seat, answer)));
+                acts.accept(() -> gate.act(seat, ahead, answered(gui, seat, seat::selectButtonOk)));
             }
             final long end = System.currentTimeMillis() + 30_000;
             while (!match.getGameView().isGameOver() && System.currentTimeMillis() < end) {
@@ -158,7 +181,7 @@ public class InputShowRaceTest {
             pool.awaitTermination(30, TimeUnit.SECONDS);
         }
 
-        System.out.printf("[show-race] answered=%d edtWalks=%d overlaps=%d thrown=%d%n", answered, gui.edtWalks, gui.overlaps.size(), thrown.size());
+        System.out.printf("[show-race] answered=%d edtWalks=%d overlaps=%d thrown=%d staleShows=%d%n", answered, gui.edtWalks, gui.overlaps.size(), thrown.size(), gui.staleShows.size());
         thrown.forEach(t -> t.printStackTrace(System.out));
         gui.overlaps.stream().distinct().limit(10).forEach(o -> System.out.println("[show-race]   " + o));
 
@@ -167,5 +190,6 @@ public class InputShowRaceTest {
         assertTrue(gui.edtWalks > 0, "prompts were shown with a walk on the EDT");
         assertEquals(gui.overlaps, List.of(), "no two threads walked the views at once");
         assertEquals(thrown, List.of(), "no act threw");
+        assertEquals(gui.staleShows, List.of(), "no input was shown again once an act had answered it");
     }
 }

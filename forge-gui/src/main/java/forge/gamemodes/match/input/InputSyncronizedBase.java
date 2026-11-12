@@ -35,6 +35,11 @@ public abstract class InputSyncronizedBase extends InputBase implements InputSyn
         cdlDone.countDown();
     }
 
+    /** Whether this input is done: stopped, or let go at the game's end. */
+    public final boolean isDone() {
+        return cdlDone.getCount() == 0;
+    }
+
     public void showAndWait() {
         getController().getInputQueue().setInput(this);
         awaitLatchRelease();

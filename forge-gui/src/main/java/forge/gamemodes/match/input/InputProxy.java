@@ -64,12 +64,17 @@ public class InputProxy implements Observer {
         if (!(nextInput instanceof InputLockUI)) {
             controller.getGui().setCurrentPlayer(nextInput.getOwner());
         }
-        final Runnable showMessage = () -> {
+        // The input is read where it is shown, while no act runs (ActGate.withViews). Read before an act
+        // that answered it, a stopped input was shown again: its prompt live, its buttons armed, and the
+        // next press went to the input after it (a Bolt's targets, cancelling the cast).
+        final Runnable showMessage = () -> ActGate.of(controller.getGame()).withViews(() -> {
             Input current = getInput();
+            if (current instanceof InputSyncronizedBase synced && synced.isDone()) {
+                return;
+            }
             controller.getInputQueue().syncPoint();
-            //System.out.printf("\t%s > showMessage @ %s/%s during %s%n", FThreads.debugGetCurrThreadId(), nextInput.getClass().getSimpleName(), current.getClass().getSimpleName(), game.getPhaseHandler().debugPrintState());
             current.showMessageInitial();
-        };
+        });
         FThreads.invokeInEdtLater(showMessage);
     }
     /**
