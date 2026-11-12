@@ -1,12 +1,14 @@
 package forge.gamemodes.match.input;
 
 import forge.game.Game;
+import forge.player.PlayerControllerHuman;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -21,6 +23,12 @@ import java.util.function.BooleanSupplier;
  * An act that comes between two inputs — the last one done, the game not yet waiting on the next —
  * is held until the game waits on an input again, then taken by it. Taken at once, it found no
  * input and was dropped: a creature clicked right after a land play never cast.
+ *
+ * The game's views are walked by one of the threads that are not the game's own at a time
+ * ({@link #withViews}): a prompt being shown on the EDT, and an act, whose input's stop is what
+ * releases the game thread. An act answers a prompt within milliseconds, and its stop walked the
+ * views, and released the game thread to walk them, while the EDT still walked them to show that
+ * prompt: whichever thread was iterating died with a ConcurrentModificationException.
  */
 public final class ActGate {
 
@@ -41,6 +49,49 @@ public final class ActGate {
     private final List<CountDownLatch> parked = new ArrayList<>();
     /** Every input some thread is waiting on — the game thread's and the parked acts' — by its latch. */
     private final List<CountDownLatch> awaited = new ArrayList<>();
+    private final ReentrantLock views = new ReentrantLock();
+
+    /** The longest an act that came between two inputs is held for the next one. */
+    private static final long BETWEEN_INPUTS_MS = 5_000;
+
+    /** A seat's act, in its turn ({@link #run}), once the game waits on an input ({@link #settle}). */
+    public void act(final PlayerControllerHuman seat, final long ticket, final Runnable act) {
+        run(ticket, () -> settleThenRun(seat, act));
+    }
+
+    /** A seat's act that goes ahead of every queued one ({@link #runFirst}): a concede. */
+    public void actFirst(final PlayerControllerHuman seat, final Runnable act) {
+        runFirst(() -> settleThenRun(seat, act));
+    }
+
+    private void settleThenRun(final PlayerControllerHuman seat, final Runnable act) {
+        settle(() -> {
+            if (seat.getGame().isGameOver()) {
+                return true;
+            }
+            final Input input = seat.getInputProxy().getInput();
+            return input != null && !(input instanceof InputLockUI);
+        }, BETWEEN_INPUTS_MS);
+        // The game thread no longer waits on an input, and walks the views to send the game's end:
+        // an act that comes after it has nothing to answer, and its walk died beside that one
+        if (seat.getGame().isGameOver()) {
+            return;
+        }
+        withViews(act);
+    }
+
+    /**
+     * Runs {@code walk} while no other thread but the game's walks the views. Reentrant: a prompt's
+     * show can stop its own input, and an act's stop is inside the act.
+     */
+    public void withViews(final Runnable walk) {
+        views.lock();
+        try {
+            walk.run();
+        } finally {
+            views.unlock();
+        }
+    }
 
     /** Taken on the thread that received the act, so tickets follow arrival order. */
     public synchronized long ticket() {
@@ -84,11 +135,19 @@ public final class ActGate {
 
     /** Waits for an input's latch the way {@code waiter} does; an act holding the game hands it back for the wait. */
     public void await(final CountDownLatch latch, final Waiter waiter) throws InterruptedException {
+        // An act waiting on an input lets that input be shown, and the acts that answer it walk
+        final int held = views.getHoldCount();
+        for (int i = 0; i < held; i++) {
+            views.unlock();
+        }
         final boolean parkedHere = startWait(latch);
         try {
             waiter.await(latch);
         } finally {
             endWait(latch, parkedHere);
+            for (int i = 0; i < held; i++) {
+                views.lock();
+            }
         }
     }
 

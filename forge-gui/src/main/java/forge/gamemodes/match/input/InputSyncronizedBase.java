@@ -42,6 +42,11 @@ public abstract class InputSyncronizedBase extends InputBase implements InputSyn
 
     @Override
     public final void stop() {
+        // not while this input is being shown: its show walks the views, and the game thread walks them once released
+        ActGate.of(getController().getGame()).withViews(this::stopNow);
+    }
+
+    private void stopNow() {
         onStop();
         getController().getGui().setSelection(Selection.ofChosen(getController().getKeptMarks()));
 

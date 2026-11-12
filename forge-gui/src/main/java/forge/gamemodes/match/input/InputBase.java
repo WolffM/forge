@@ -75,6 +75,11 @@ public abstract class InputBase implements java.io.Serializable, Input {
     // showMessage() is always the first method called
     @Override
     public final void showMessageInitial() {
+        // walks the views on the EDT while an act may answer, and release the game thread (ActGate)
+        ActGate.of(controller.getGame()).withViews(this::showInitial);
+    }
+
+    private void showInitial() {
         finished = false;
         controller.cancelAwaitNextInput();
         if (isBusy()) {

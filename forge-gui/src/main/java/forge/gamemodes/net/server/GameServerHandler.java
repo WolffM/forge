@@ -1,8 +1,6 @@
 package forge.gamemodes.net.server;
 
 import forge.gamemodes.match.input.ActGate;
-import forge.gamemodes.match.input.Input;
-import forge.gamemodes.match.input.InputLockUI;
 import forge.gamemodes.net.GameProtocolHandler;
 import forge.util.IHasForgeLog;
 import forge.gamemodes.net.IRemote;
@@ -31,9 +29,6 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
             ProtocolMethod.selectButtonOk, ProtocolMethod.selectButtonCancel, ProtocolMethod.useMana,
             ProtocolMethod.undoLastAction, ProtocolMethod.alphaStrike, ProtocolMethod.concede);
 
-    /** The longest an act that came between two inputs is held for the next one. */
-    private static final long BETWEEN_INPUTS_MS = 5_000;
-
     GameServerHandler(final FServerManager server) {
         super(false);
         this.server = server;
@@ -43,23 +38,13 @@ final class GameServerHandler extends GameProtocolHandler<IGameController> imple
     protected void runInBackground(final ChannelHandlerContext ctx, final ProtocolMethod protocolMethod, final Runnable toRun) {
         if (ACTS.contains(protocolMethod) && getToInvoke(ctx) instanceof PlayerControllerHuman pch) {
             final ActGate gate = ActGate.of(pch.getGame());
-            final Runnable settled = () -> {
-                gate.settle(() -> {
-                    if (pch.getGame().isGameOver()) {
-                        return true;
-                    }
-                    final Input input = pch.getInputProxy().getInput();
-                    return input != null && !(input instanceof InputLockUI);
-                }, BETWEEN_INPUTS_MS);
-                toRun.run();
-            };
-            // A concede ends the game for every act behind it: it goes ahead of them (ActGate#runFirst).
+            // A concede ends the game for every act behind it: it goes ahead of them (ActGate#actFirst).
             if (protocolMethod == ProtocolMethod.concede) {
-                super.runInBackground(ctx, protocolMethod, () -> gate.runFirst(settled));
+                super.runInBackground(ctx, protocolMethod, () -> gate.actFirst(pch, toRun));
                 return;
             }
             final long ticket = gate.ticket();
-            super.runInBackground(ctx, protocolMethod, () -> gate.run(ticket, settled));
+            super.runInBackground(ctx, protocolMethod, () -> gate.act(pch, ticket, toRun));
         } else {
             super.runInBackground(ctx, protocolMethod, toRun);
         }
