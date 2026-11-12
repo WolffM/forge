@@ -46,6 +46,12 @@ public final class UndoManager {
      * with undo history; the oldest steps are dropped first.
      */
     private static final long MAX_RETAINED_BYTES = Math.min(1L << 30, Runtime.getRuntime().maxMemory() / 7);
+    /** This game's share of the heap for its history: {@link #MAX_RETAINED_BYTES} unless a host that runs several games in one JVM sets it. */
+    private long maxRetainedBytes = MAX_RETAINED_BYTES;
+    /** True once a host chose the mode ({@link #setHostMode}): the local preference no longer applies. */
+    private boolean hostSet;
+    /** Moves whenever what can be undone changes: a checkpoint, a barrier, an undo, a mode change. */
+    private long version;
 
     private static final long MIN_INCREMENTAL_ESTIMATE = 256L << 10;
     private static final long MIN_HEAP_RESERVE = 512L << 10;
@@ -109,7 +115,7 @@ public final class UndoManager {
     /** Game thread. Frees the undo history and the recorder's registry. */
     private synchronized void dropHistory(String why) {
         debug("history dropped (" + stack.size() + " steps): " + why);
-        stack.clear();
+        stack.clear(); version++;
         barrierReason = why;
         justRestored = false;
         recorder.reset();
@@ -118,7 +124,7 @@ public final class UndoManager {
 
     /** Drops obsolete undo deltas but keeps the latest baseline for a cheaper refresh. */
     private synchronized void discardHistoryKeepingBaseline(String why) {
-        stack.clear();
+        stack.clear(); version++;
         barrierReason = why;
         justRestored = false;
         recorder.detach();
@@ -135,7 +141,7 @@ public final class UndoManager {
     }
 
     /** Estimated heap pinned by the history: the recorder's current state plus the delta of every step. */
-    private synchronized long retainedBytes() {
+    public synchronized long retainedBytes() {
         long n = recorder.liveBytes();
         for (Entry e : stack) { n += e.memento().retainedBytes(); }
         return n;
@@ -143,11 +149,26 @@ public final class UndoManager {
 
     public synchronized Mode mode() { return mode; }
 
-    /** Game thread; safe to call every prompt. Turning undo off drops the history. */
+    /** The host's choice of mode for this game; from then on {@link #setMode} from a local preference is ignored. */
+    public synchronized void setHostMode(Mode m) {
+        hostSet = false;
+        setMode(m);
+        hostSet = true;
+    }
+
+    /** Caps the heap this game's history may pin (the oldest steps go first). A host running several games sets each one's share. */
+    public synchronized void setRetainedBudget(long bytes) { maxRetainedBytes = Math.max(0, bytes); }
+    public synchronized long retainedBudget() { return maxRetainedBytes; }
+
+    /** A count that moves whenever what can be undone changes. */
+    public synchronized long version() { return version; }
+
+    /** Game thread; safe to call every prompt. Turning undo off drops the history. Ignored once the host chose the mode. */
     public synchronized void setMode(Mode m) {
-        if (m == mode) { return; }
+        if (hostSet || m == mode) { return; }
+        version++;
         mode = m;
-        stack.clear();
+        stack.clear(); version++;
         justRestored = false;
         barrierReason = m == Mode.OFF ? "Undo is off" : null;
         if (m == Mode.OFF) { resetRecorder = true; }   // the game thread frees the registry at its next checkpoint
@@ -164,7 +185,7 @@ public final class UndoManager {
             if (resetRecorder) { resetRecorder = false; recorder.reset(); }
             if (mode == Mode.OFF) { return; }
             if (owner != null && owner != who) {      // another human is now acting: their history is not ours to rewind
-                stack.clear();
+                stack.clear(); version++;
                 barrierReason = "Another player had priority";
                 justRestored = false;
             }
@@ -181,13 +202,13 @@ public final class UndoManager {
             if (phaseKey > budgetPhase) { budgetPhase = phaseKey; undosLeft = UNDOS_PER_PHASE; }
             final int cap = mode == Mode.SINGLE_STEP ? 2 : MAX;
             while (stack.size() >= cap
-                    || (stack.size() > 1 && retainedBytes() + recorder.lastDeltaBytes() > MAX_RETAINED_BYTES)) {
+                    || (stack.size() > 1 && retainedBytes() + recorder.lastDeltaBytes() > maxRetainedBytes)) {
                 stack.removeLast();
             }
             // The new memento must follow the newest one on the stack. If it does not (the history was cleared, or
             // something is out of step), start a fresh chain instead of attaching a delta to a memento nobody can use.
             if (!stack.isEmpty() && !recorder.isLatest(stack.peek().memento())) {
-                stack.clear();
+                stack.clear(); version++;
                 barrierReason = "Undo history was reset";
             }
             if (stack.isEmpty()) { recorder.detach(); }
@@ -218,10 +239,10 @@ public final class UndoManager {
         }
 
         synchronized (this) {
-            stack.push(entry);
+            stack.push(entry); version++;
             if (DEBUG) {
                 debug("depth=" + stack.size() + " retained=" + (retainedBytes() >> 20) + "MB of "
-                        + (MAX_RETAINED_BYTES >> 20) + "MB, objects=" + lastObjects);
+                        + (maxRetainedBytes >> 20) + "MB, objects=" + lastObjects);
             }
             //System.out.println("[undo] objects=" + entry.memento().objectCount() + " delta=" + recorder.lastDeltaEntries() + " retained=" + retainedBytes());
             if (stack.size() >= 2) barrierReason = null;
@@ -294,7 +315,7 @@ public final class UndoManager {
 
     /** Anything that reveals hidden info or makes the opponent act. */
     public synchronized void barrier(String why) {
-        if (!stack.isEmpty()) { debug("barrier '" + why + "' cleared " + stack.size() + " steps"); }
+        if (!stack.isEmpty()) { debug("barrier '" + why + "' cleared " + stack.size() + " steps"); version++; }
         stack.clear();
         barrierReason = why;
     }
@@ -315,18 +336,18 @@ public final class UndoManager {
         Entry target;
         synchronized (this) {
             if (!canUndo()) return false;
-            stack.pop();
+            stack.pop(); version++;
             if (LIMITED) undosLeft--;
             target = stack.peek();
             if (mode == Mode.SINGLE_STEP) {          // forget everything older than the state we are restoring
-                stack.clear();
+                stack.clear(); version++;
                 stack.push(target);
             }
         }
         game.fireEvent(new GameEventSnapshotRestored(true));
         if (!target.memento().restore()) {            // refused, nothing was written: the history is unusable
             synchronized (this) {
-                stack.clear();
+                stack.clear(); version++;
                 barrierReason = "Undo history was lost";
                 justRestored = false;
             }
@@ -338,8 +359,11 @@ public final class UndoManager {
         if (!target.memento().problems.isEmpty()) System.err.println("Undo problems: " + target.memento().problems);
         refreshViews(game);
         game.fireEvent(new GameEventSnapshotRestored(false));
-        randomMark = MyRandom.callCount();
-        justRestored = true;
+        synchronized (this) {
+            randomMark = MyRandom.callCount();
+            justRestored = true;
+            version++;
+        }
         return true;
     }
 
