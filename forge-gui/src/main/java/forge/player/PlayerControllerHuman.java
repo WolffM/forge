@@ -2885,6 +2885,24 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
         return UndoManager.Mode.FREE;
     }
 
+    /**
+     * Whether {@link #rewindLastAction} would take back this player's last action: they hold priority at a priority
+     * prompt and the game's undo history has a step for them (UndoManager; its barriers decide how far back).
+     * Separate from {@link #canUndoLastAction}, the stack's mana-ability undo, which a land click still performs.
+     */
+    public boolean canRewind() {
+        if (getGame().getPhaseHandler().getPriorityPlayer() != player) return false;
+        return getGame().getUndoManager().canUndo(player) && inputQueue.getInput() instanceof InputPassPriority;
+    }
+
+    /** Asks the game thread to restore the previous priority prompt's checkpoint; the restore happens in chooseSpellAbilityToPlay. */
+    public boolean rewindLastAction() {
+        if (!canRewind() || !(inputQueue.getInput() instanceof InputPassPriority inp)) return false;
+        getGame().getUndoManager().requestUndo();
+        inp.restartPrompt();
+        return true;
+    }
+
     public boolean canUndoLastAction() {
         if (!getGame().stack.canUndo(player)) {
             return false;

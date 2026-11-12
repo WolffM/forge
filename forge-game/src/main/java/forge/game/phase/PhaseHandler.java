@@ -1184,16 +1184,16 @@ public class PhaseHandler implements IHasForgeLog {
                 // CR 117.3 A player receives priority once state-based actions are done, and again after each thing they do
                 game.fireEvent(new GameEventPlayerPriority(PlayerView.get(playerTurn), phase, PlayerView.get(getPriorityPlayer())));
                 game.stashGameState();
+                // Undo reaches back to when someone else last had priority (AI or human, acting or not): from then on
+                // they may have seen or done something the rewind would take back from them
+                if (!game.getUndoManager().isOwner(pPlayerPriority)) {
+                    game.getUndoManager().barrier("Opponent had priority");
+                }
 
                 chosenSa = pPlayerPriority.getController().chooseSpellAbilityToPlay();
 
                 if (chosenSa == null) {
                     break; // that means 'I pass'
-                }
-
-                // An opponent (AI or remote human) acted: the player now knows something, so no undo past this point
-                if (!game.getUndoManager().isOwner(pPlayerPriority)) {
-                    game.getUndoManager().barrier("Opponent acted");
                 }
 
                 if (DEBUG_PHASES) {
