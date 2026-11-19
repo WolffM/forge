@@ -630,6 +630,27 @@ public class ComputerUtilMana {
         return manaProduced;
     }
 
+    /**
+     * Set the pool's conversion matrix to what a payment of {@code sa} spends mana under: the
+     * permission the spell is cast by ("mana of any type can be spent to cast it"), the ability's
+     * own or its grantor's ManaConversion, and every ManaConvert static that applies.
+     */
+    static void applyManaConversions(final ManaPool manapool, final SpellAbility sa, final Player ai, final boolean effect) {
+        manapool.restoreColorReplacements();
+        CardPlayOption mayPlay = sa.getMayPlayOption();
+        if (!effect) {
+            if (sa.isSpell() && mayPlay != null) {
+                mayPlay.applyManaConvert(manapool);
+            } else if (sa.isActivatedAbility() && sa.getGrantorStatic() != null && sa.getGrantorStatic().hasParam("ManaConversion")) {
+                AbilityUtils.applyManaColorConversion(manapool, sa.getGrantorStatic().getParam("ManaConversion"));
+            }
+        }
+        if (sa.hasParam("ManaConversion")) {
+            AbilityUtils.applyManaColorConversion(manapool, sa.getParam("ManaConversion"));
+        }
+        StaticAbilityManaConvert.manaConvert(manapool, ai, sa.getHostCard(), effect && !sa.isCastFromPlayEffect() ? null : sa);
+    }
+
     // returns null if unpayable
     private static List<SpellAbility> payManaCost(final ManaCostBeingPaid cost, final SpellAbility sa, final Player ai, final boolean test, boolean checkPlayable, boolean effect) {
         return payManaCost(cost, sa, ai, test, checkPlayable, effect, List.of());
@@ -655,19 +676,7 @@ public class ComputerUtilMana {
 
         // Apply color/type conversion matrix if necessary (already done via autopay)
         if (ai.getControllingPlayer() == null) {
-            manapool.restoreColorReplacements();
-            CardPlayOption mayPlay = sa.getMayPlayOption();
-            if (!effect) {
-                if (sa.isSpell() && mayPlay != null) {
-                    mayPlay.applyManaConvert(manapool);
-                } else if (sa.isActivatedAbility() && sa.getGrantorStatic() != null && sa.getGrantorStatic().hasParam("ManaConversion")) {
-                    AbilityUtils.applyManaColorConversion(manapool, sa.getGrantorStatic().getParam("ManaConversion"));
-                }
-            }
-            if (sa.hasParam("ManaConversion")) {
-                AbilityUtils.applyManaColorConversion(manapool, sa.getParam("ManaConversion"));
-            }
-            StaticAbilityManaConvert.manaConvert(manapool, ai, sa.getHostCard(), effect && !sa.isCastFromPlayEffect() ? null : sa);
+            applyManaConversions(manapool, sa, ai, effect);
         }
 
         // not worth checking if it makes sense to not spend floating first

@@ -12,7 +12,9 @@ import forge.game.cost.CostPart;
 import forge.game.cost.CostPartMana;
 import forge.game.cost.CostPayLife;
 import forge.game.cost.CostTap;
+import forge.game.mana.ManaConversionMatrix;
 import forge.game.mana.ManaCostBeingPaid;
+import forge.game.mana.ManaPool;
 import forge.game.phase.PhaseHandler;
 import forge.game.phase.PhaseType;
 import forge.game.player.Player;
@@ -383,11 +385,26 @@ public final class AvailableActions {
         if (sa.getPayCosts() == null || !sa.getPayCosts().hasManaCost()) {
             return true;
         }
-        // TODO include RemoveDeck:All when they weren't used
-        if (ComputerUtilMana.canPayManaCost(sa, player, 0, false)) {
-            return true;
+        // The payer applies a payment's mana conversions ("mana of any type can be spent to cast
+        // it", "you may spend white mana as though it were red mana") only for a player nobody
+        // controls, because a human's payment has set them on the pool by the time Auto asks it.
+        // This sweep runs under a controller with no payment begun, so it sets them itself, and
+        // puts the pool back as it found it: nothing is being paid for.
+        final ManaPool pool = player.getManaPool();
+        final ManaConversionMatrix before = new ManaConversionMatrix();
+        before.restoreColorReplacements();
+        before.applyCardMatrix(pool);
+        try {
+            ComputerUtilMana.applyManaConversions(pool, sa, player, false);
+            // TODO include RemoveDeck:All when they weren't used
+            if (ComputerUtilMana.canPayManaCost(sa, player, 0, false)) {
+                return true;
+            }
+            return canAffordWithManaRocks(sa, player) || canAffordWithLife(sa, player) || canAffordWithLifeMana(sa, player);
+        } finally {
+            pool.restoreColorReplacements();
+            pool.applyCardMatrix(before);
         }
-        return canAffordWithManaRocks(sa, player) || canAffordWithLife(sa, player) || canAffordWithLifeMana(sa, player);
     }
 
     /**
