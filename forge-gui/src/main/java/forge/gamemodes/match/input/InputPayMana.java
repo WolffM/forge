@@ -48,7 +48,8 @@ public abstract class InputPayMana extends InputSyncronizedBase {
     private CardCollection autoPayManaSources = null;
     private boolean autoPayManaSourcesKnown = false;
 
-    private boolean locked = false;
+    /** An ability this input started is still running. Read by the next act (ActGate orders them) and the EDT's show. */
+    private volatile boolean locked = false;
 
     protected InputPayMana(final PlayerControllerHuman controller, final SpellAbility saPaidFor0, final Player player0, final boolean effect) {
         super(controller);
@@ -362,7 +363,11 @@ public abstract class InputPayMana extends InputSyncronizedBase {
                     }
                 }
             } finally {
-                // Need to call this to unlock, and to set the buttons if a render was skipped while busy
+                // Unlocked here, as the ability ends, not by the re-render it queues: the next source's act
+                // runs as soon as this one returns, before the EDT has re-rendered, and was refused with
+                // "Should wait till previous call to playAbility finishes" (cardtable AF664). Then the
+                // buttons, in case a render was skipped while busy
+                locked = false;
                 showMessage();
             }
         });
@@ -398,7 +403,11 @@ public abstract class InputPayMana extends InputSyncronizedBase {
             final Runnable proc = () -> ComputerUtilMana.payManaCost(manaCost, saPaidFor, player, effect);
             //must run in game thread as certain payment actions can only be automated there
             game.getAction().invoke(() -> {
-                runAsAi(proc);
+                try {
+                    runAsAi(proc);
+                } finally {
+                    locked = false;
+                }
                 onStateChanged();
             });
         }
@@ -413,7 +422,6 @@ public abstract class InputPayMana extends InputSyncronizedBase {
     }
 
     protected final void updateMessage() {
-        locked = false;
         if (activateDelayedCard()) {
             return;
         }
