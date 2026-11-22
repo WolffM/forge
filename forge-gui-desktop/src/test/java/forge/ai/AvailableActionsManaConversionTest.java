@@ -30,8 +30,8 @@ public class AvailableActionsManaConversionTest extends AITest {
 
         addCard("Sunglasses of Urza", player); // You may spend white mana as though it were red mana.
         AssertJUnit.assertTrue("white mana pays {R} under the conversion", offered(player, bolt));
-        AssertJUnit.assertEquals("the pool is left with no conversion", ManaAtom.WHITE,
-                player.getManaPool().getPossibleColorUses(ManaAtom.WHITE));
+        AssertJUnit.assertEquals("the pool is left with no conversion", (byte) ManaAtom.WHITE,
+                player.getManaPool().getPossibleColorUses((byte) ManaAtom.WHITE));
     }
 
     @Test
@@ -48,7 +48,7 @@ public class AvailableActionsManaConversionTest extends AITest {
         game.getAction().checkStaticAbilities();
 
         AssertJUnit.assertTrue("the permission's conversion pays {R} with white mana", offered(player, bolt));
-        AssertJUnit.assertEquals("the pool is left with no conversion", ManaAtom.WHITE,
-                player.getManaPool().getPossibleColorUses(ManaAtom.WHITE));
+        AssertJUnit.assertEquals("the pool is left with no conversion", (byte) ManaAtom.WHITE,
+                player.getManaPool().getPossibleColorUses((byte) ManaAtom.WHITE));
     }
 }
