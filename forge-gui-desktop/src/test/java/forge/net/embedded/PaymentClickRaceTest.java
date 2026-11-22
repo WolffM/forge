@@ -38,7 +38,9 @@ import static org.testng.Assert.assertTrue;
  * A source's mana is played inside its act, and the payment then re-renders on the EDT; that
  * re-render walked the views beside the next source's act, and whichever thread was iterating died
  * with a ConcurrentModificationException (cardtable m-b1bcfd5382d0: an Island clicked 15 ms after a
- * Creeping Tar Pit, in {@code DeltaSyncManager.collectDeltas}).
+ * Creeping Tar Pit, in {@code DeltaSyncManager.collectDeltas}). Each land is clicked once, as a player
+ * does: one refused because the last one's ability had not yet unlocked the input stalled the payment
+ * (cardtable AF664).
  */
 public class PaymentClickRaceTest {
 
@@ -59,6 +61,20 @@ public class PaymentClickRaceTest {
         final RegisteredPlayer human = new RegisteredPlayer(humanDeck).setPlayer(new LobbyPlayerHuman("Seat"));
         final RegisteredPlayer ai = new RegisteredPlayer(aiDeck).setPlayer(GamePlayerUtil.createAiPlayer("AI"));
 
+        // Forge's own word for a source it refused because the last one's ability was still running
+        final java.util.concurrent.atomic.AtomicInteger refused = new java.util.concurrent.atomic.AtomicInteger();
+        final java.io.PrintStream err = System.err;
+        System.setErr(new java.io.PrintStream(new java.io.OutputStream() {
+            private final StringBuilder seen = new StringBuilder();
+            @Override public synchronized void write(final int b) {
+                err.write(b);
+                seen.append((char) b);
+                final int at = seen.indexOf("Should wait till previous call to playAbility finishes");
+                if (at >= 0) { refused.incrementAndGet(); seen.delete(0, at + 1); }
+                if (seen.length() > 256) { seen.delete(0, seen.length() - 128); }
+            }
+        }, true));
+
         final HostedMatch match = new HostedMatch();
         match.startMatch(GameType.Constructed, null, List.of(human, ai), human, gui);
 
@@ -74,6 +90,8 @@ public class PaymentClickRaceTest {
         int sourcesClicked = 0;
         boolean conceded = false;
         int landTurn = -1;
+        // A payment is re-rendered after each source; its lands are clicked on its first showing only, once each
+        Input paying = null;
         final long deadline = System.currentTimeMillis() + 180_000;
         while (!conceded && System.currentTimeMillis() < deadline) {
             final GuiGameEvent prompt = remote.buttonPrompts.poll(5, TimeUnit.SECONDS);
@@ -95,9 +113,11 @@ public class PaymentClickRaceTest {
             final Input input = seat.getInputProxy().getInput();
             final boolean mine = owner.equals(gv.getPlayerTurn());
             if (input instanceof InputPayMana) {
-                // Every untapped land at once, each its own act: the next one arrives while the last one's mana is shown.
-                // Forge drops a source clicked while the last one's mana is still being played (InputPayMana's
-                // `locked`), and each re-render of the payment is a prompt here, so its lands are clicked again on it
+                if (input == paying) {
+                    continue;
+                }
+                paying = input;
+                // Every untapped land at once, each its own act: the next one arrives while the last one's mana is shown
                 final List<CardView> lands = new ArrayList<>();
                 for (final CardView c : owner.getBattlefield() == null ? List.<CardView>of() : owner.getBattlefield()) {
                     if (!c.isTapped() && c.getCurrentState().getType().isLand()) {
@@ -135,11 +155,13 @@ public class PaymentClickRaceTest {
             Thread.sleep(100);
         }
 
-        System.out.printf("[payment-race] payments=%d sources=%d edtWalks=%d overlaps=%d thrown=%d staleShows=%d%n",
-                payments, sourcesClicked, gui.edtWalks, gui.overlaps.size(), thrown.size(), gui.staleShows.size());
+        System.setErr(err);
+        System.out.printf("[payment-race] payments=%d sources=%d refused=%d edtWalks=%d overlaps=%d thrown=%d staleShows=%d%n",
+                payments, sourcesClicked, refused.get(), gui.edtWalks, gui.overlaps.size(), thrown.size(), gui.staleShows.size());
         thrown.forEach(t -> t.printStackTrace(System.out));
         gui.overlaps.stream().distinct().limit(10).forEach(o -> System.out.println("[payment-race]   " + o));
 
+        assertEquals(refused.get(), 0, "no source was refused for the last one's ability still running");
         assertTrue(conceded, "the game reached turn 14");
         assertTrue(payments >= 3, "Divination was paid for by hand at least three times");
         assertTrue(match.getGameView().isGameOver(), "the concede ended the game");
