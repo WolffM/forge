@@ -100,6 +100,10 @@ public class ProtocolGuiGameInProcessTest {
                 case getAbilityToPlay -> {
                     // Prefer playing the land over cycling it
                     final List<SpellAbilityView> abilities = (List<SpellAbilityView>) a[1];
+                    // Nothing to choose (a mana source already tapped): a client answers nothing
+                    if (abilities.isEmpty()) {
+                        yield null;
+                    }
                     SpellAbilityView pick = abilities.get(0);
                     for (final SpellAbilityView sa : abilities) {
                         if (!sa.toString().toLowerCase().contains("cycling")) { pick = sa; break; }
