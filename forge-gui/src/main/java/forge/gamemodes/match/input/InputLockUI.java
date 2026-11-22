@@ -51,7 +51,13 @@ public class InputLockUI implements Input {
             if ( ixCall != iCall.get() || !isActive()) {
                 return;
             }
-            FThreads.invokeInEdtLater(showMessageFromEdt);
+            // Its prompt walks the views: not beside an act walking them (ActGate#withViews), and not once
+            // another input has taken over
+            FThreads.invokeInEdtLater(() -> ActGate.of(controller.getGame()).withViews(() -> {
+                if (isActive()) {
+                    showMessageFromEdt.run();
+                }
+            }));
         }
     }
 

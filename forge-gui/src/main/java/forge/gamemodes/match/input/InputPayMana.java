@@ -440,7 +440,15 @@ public abstract class InputPayMana extends InputSyncronizedBase {
             done();
             stop();
         } else {
-            FThreads.invokeInEdtNowOrLater(this::updateMessage);
+            // The re-render walks the views (its selection and its prompt), so it waits for no act to be
+            // walking them (ActGate#withViews). Run beside the next source's act it died with a
+            // ConcurrentModificationException: a second land clicked while the first one's mana was
+            // shown. Paid by then, the input is not shown again.
+            FThreads.invokeInEdtNowOrLater(() -> ActGate.of(game).withViews(() -> {
+                if (!isDone()) {
+                    updateMessage();
+                }
+            }));
         }
     }
 
