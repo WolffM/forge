@@ -17,6 +17,7 @@ import forge.card.mana.ManaAtom;
 import forge.game.ability.AbilityFactory;
 import forge.game.ability.ApiType;
 import forge.game.ability.SpellAbilityEffect;
+import forge.game.ability.effects.CopyPermanentEffect;
 import forge.game.ability.effects.DetachedCardEffect;
 import forge.game.ability.effects.EffectEffect;
 import forge.game.card.*;
@@ -36,6 +37,7 @@ import forge.game.trigger.Trigger;
 import forge.game.trigger.TriggerHandler;
 import forge.game.zone.PlayerZone;
 import forge.game.zone.ZoneType;
+import forge.item.IPaperCard;
 import forge.item.PaperCard;
 import forge.item.PaperToken;
 import forge.util.TextUtil;
@@ -45,6 +47,9 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.regex.Matcher;
@@ -793,7 +798,7 @@ public class GameState {
                     kinds.add("detached-effect");
                 } else if (!c.isToken() && c.getPaperCard() == null && effectLine(c) == null) {
                     kinds.add(c.isEmblem() ? "emblem" : "effect");
-                } else if (c.isToken() && !new TokenInfo(c).hasScript() && hasAbilitiesBeyondKeywords(c)) {
+                } else if (c.isToken() && !new TokenInfo(c).hasScript() && tokenCopyParams(c) == null && hasAbilitiesBeyondKeywords(c)) {
                     kinds.add("token");
                 }
                 if (zone == ZoneType.Battlefield) {
@@ -824,6 +829,51 @@ public class GameState {
     private static boolean ownAbility(final Iterable<? extends CardTraitBase> traits) {
         for (CardTraitBase t : traits) if (t.isIntrinsic() && t.getKeyword() == null) return true;
         return false;
+    }
+
+    /** Every parameter {@code CardFactory.getCloneStates} reads off a copy's cause: what can make a copy differ from its card. */
+    private static final List<String> COPY_EXCEPTIONS = List.of("AddAbilities", "AddColors", "AddKeywords", "AddStaticAbilities", "AddSVars",
+            "AddTriggers", "AddTypes", "Embalm", "GainTextAbilities", "GainTextOf", "GainThisAbility", "KeepName", "NewName", "NonLegendary",
+            "RemoveCardTypes", "RemoveCost", "RemoveKeywords", "RemoveSubTypes", "SetColor", "SetColorByManaCost", "SetCreatureTypes",
+            "SetLoyalty", "SetManaCost", "SetPower", "SetToughness");
+    /** The exceptions a {@code TokenCopy:} line carries; a copy made with any other one stays a {@code t:} line, named by {@link #unwritten}. */
+    private static final Set<String> COPY_CARRIED = Set.of("AddTypes", "NonLegendary", "SetPower", "SetToughness");
+
+    /**
+     * A token that is a copy of a card (Offspring's 1/1 copy, a Cackling Counterpart, Vaultborn Tyrant's artifact copy), as the
+     * exceptions its copy effect made, URL-encoded so no separator of a state file appears in it: written as the card it copied
+     * with {@code |TokenCopy:<these>}, and rebuilt by {@link #tokenCopy} through the same copy effect, abilities and all. Null
+     * when the token is not such a copy, or its copy carries an exception the line cannot: a copy of a copy (its name is not its
+     * printed card's), a face-down or transformed one, a merged one.
+     */
+    static String tokenCopyParams(final Card c) {
+        final IPaperCard paper = c.getPaperCard();
+        if (!c.isToken() || c.getCopiedPermanent() == null || paper == null || c.isFaceDown() || c.isTransformed() || c.hasMergedCard()) return null;
+        if (!c.getName().equals(paper.getName())) return null;
+        final SpellAbility sa = c.getTokenSpawningAbility();
+        if (sa == null || sa.getApi() != ApiType.CopyPermanent) return null;
+        for (String p : COPY_EXCEPTIONS) if (sa.hasParam(p) && !COPY_CARRIED.contains(p)) return null;
+        final CardState st = c.getState(CardStateName.Original);
+        final List<String> parts = new ArrayList<>();
+        if (sa.hasParam("SetPower")) parts.add("SetPower$ " + st.getBasePower());
+        if (sa.hasParam("SetToughness")) parts.add("SetToughness$ " + st.getBaseToughness());
+        if (sa.hasParam("AddTypes")) parts.add("AddTypes$ " + sa.getParam("AddTypes"));
+        if (sa.hasParam("NonLegendary")) parts.add("NonLegendary$ True");
+        return URLEncoder.encode(String.join(" | ", parts), StandardCharsets.UTF_8);
+    }
+
+    /** The token copy of {@code pc} a {@code TokenCopy:} line names, made as {@code TokenEffectBase} makes one from its prototype. */
+    private static Card tokenCopy(final IPaperCard pc, final Player player, final String encoded) {
+        final String params = URLDecoder.decode(encoded, StandardCharsets.UTF_8);
+        final Card original = Card.fromPaperCard(pc, player);
+        final SpellAbility sa = AbilityFactory.getAbility("DB$ CopyPermanent | Defined$ Self" + (params.isEmpty() ? "" : " | " + params), original);
+        final Card proto = CopyPermanentEffect.getProtoType(sa, original, player);
+        final Card tok = new CardCopyService(proto).copyCard(true);
+        tok.getStates().forEach(cs -> tok.getState(cs).resetOriginalHost(proto));
+        tok.setOwner(player);
+        tok.setGamePieceType(GamePieceType.TOKEN);
+        tok.setCopiedPermanent(proto);
+        return tok;
     }
 
     private String getPlayerString(Player p) {
@@ -872,7 +922,9 @@ public class GameState {
         if (newText.length() > 0) {
             newText.append(";");
         }
-        if (c.isToken()) {
+        // A token copy of a card is written as that card, so a restore makes it again from the card, abilities and all.
+        final String copyOf = tokenCopyParams(c);
+        if (c.isToken() && copyOf == null) {
             // the token's image key is name|SET|collector|art, and '|' also separates a card's modifiers in a state file,
             // so escape it here (restored in processCardsForZone) instead of letting the loader cut the key apart
             newText.append("t:").append(new TokenInfo(c).toString().replace("|", TOKEN_PIPE));
@@ -892,6 +944,7 @@ public class GameState {
                 newText.append(c.getPaperCard().getName()).append(suffix).append("|Set:").append(c.getPaperCard().getEdition())
                         .append("|Art:").append(c.getPaperCard().getArtIndex());
             }
+            if (copyOf != null) newText.append("|TokenCopy:").append(copyOf);
         }
         if (c.isCommander()) {
             newText.append("|IsCommander");
@@ -2052,9 +2105,15 @@ public class GameState {
                     continue;
                 }
 
-                c = Card.fromPaperCard(pc, player);
-                if (setCode != null) {
-                    hasSetCurSet = true;
+                String copyOf = null;
+                for (final String info : cardinfo) if (info.startsWith("TokenCopy:")) copyOf = info.substring("TokenCopy:".length());
+                if (copyOf != null) {
+                    c = tokenCopy(pc, player, copyOf);
+                } else {
+                    c = Card.fromPaperCard(pc, player);
+                    if (setCode != null) {
+                        hasSetCurSet = true;
+                    }
                 }
             }
             c.setSickness(false);
