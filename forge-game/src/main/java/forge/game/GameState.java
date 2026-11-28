@@ -793,6 +793,8 @@ public class GameState {
                     kinds.add("detached-effect");
                 } else if (!c.isToken() && c.getPaperCard() == null && effectLine(c) == null) {
                     kinds.add(c.isEmblem() ? "emblem" : "effect");
+                } else if (c.isToken() && !new TokenInfo(c).hasScript() && hasAbilitiesBeyondKeywords(c)) {
+                    kinds.add("token");
                 }
                 if (zone == ZoneType.Battlefield) {
                     for (long ts : c.getTempControllers().keySet()) {
@@ -808,6 +810,20 @@ public class GameState {
         for (Trigger t : th.getPlayerDefinedDelayedTriggers().values()) if (delayedTriggerLine(t, "P0") == null) kinds.add("delayed-trigger");
         kinds.addAll(unwrittenCommands(game));
         return new ArrayList<>(kinds);
+    }
+
+    /**
+     * Whether a token has an ability of its own that no keyword gives: a token's {@code t:} line rebuilds
+     * one with no script (a copy of a card, a token made from parameters) as a body and its keywords only.
+     */
+    private static boolean hasAbilitiesBeyondKeywords(final Card c) {
+        final CardState st = c.getCurrentState();
+        return ownAbility(st.getSpellAbilities()) || ownAbility(st.getTriggers()) || ownAbility(st.getStaticAbilities()) || ownAbility(st.getReplacementEffects());
+    }
+
+    private static boolean ownAbility(final Iterable<? extends CardTraitBase> traits) {
+        for (CardTraitBase t : traits) if (t.isIntrinsic() && t.getKeyword() == null) return true;
+        return false;
     }
 
     private String getPlayerString(Player p) {
@@ -2015,7 +2031,11 @@ public class GameState {
                 String tokenStr = cardinfo[0].substring(2).replace(TOKEN_PIPE, "|");
                 int image = tokenStr.lastIndexOf("Image:");
                 if (image >= 0) tokenStr = tokenStr.substring(0, image) + tokenStr.substring(image).replace('/', '|');
-                c = new TokenInfo(tokenStr).makeOneToken(player);
+                // Made from its script when its image names one, so it keeps the abilities a body and keywords
+                // do not carry (a Treasure's mana, a Saproling Burst token's power); see unwritten's "token".
+                final TokenInfo info = new TokenInfo(tokenStr);
+                c = info.makeFromScript(player);
+                if (c == null) c = info.makeOneToken(player);
             } else if (cardinfo[0].startsWith("T:")) {
                 String tokenStr = cardinfo[0].substring(2);
                 PaperToken token = StaticData.instance().getAllTokens().getToken(tokenStr,

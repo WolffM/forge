@@ -152,6 +152,31 @@ public class TokenInfo {
         return sb.toString();
     }
 
+    /**
+     * The token its image names, made from that token script with every ability the script gives it, its
+     * printing put back exactly; null when the image names no script that makes a token of this name (a
+     * copy of a card, a token made from parameters). {@link #makeOneToken} makes only a body and keywords.
+     */
+    public Card makeFromScript(final Player controller) {
+        final PaperToken token = script();
+        if (token == null) return null;
+        final Card c = CardFactory.getCard(token, controller, controller.getGame());
+        c.setImageKey(ImageKeys.getTokenKey(imageName));
+        return c;
+    }
+
+    /** Whether {@link #makeFromScript} makes this token from its script. */
+    public boolean hasScript() {
+        return script() != null;
+    }
+
+    private PaperToken script() {
+        if (imageName == null) return null;
+        final String[] key = imageName.split("\\|");
+        final PaperToken token = StaticData.instance().getAllTokens().getToken(key[0], key.length > 1 ? key[1] : CardEdition.UNKNOWN_CODE);
+        return token == null || !token.getName().equals(name) ? null : token;
+    }
+
     public Card makeOneToken(final Player controller) {
         return makeOneToken(controller, controller.getGame().nextCardId());
     }
